@@ -264,6 +264,30 @@ class Execute : public Named
      *  signalled and invoked */
     bool takeInterrupt(ThreadID thread_id, BranchData &branch);
 
+    /** Issues a non-cost instruction to the specified thread's
+     * noCost functional unit */
+    void issueNoCostInst(ThreadID thread_id, MinorDynInstPtr inst);
+
+    /** Inserts an instruction into a functional unit pipeline for
+      * execution, and marks its destinations as busy in the scoreboard.*/
+    void insertIntoFU(ThreadID thread_id, MinorDynInstPtr inst,
+        MinorFUTiming *timing, int fu_index);
+
+    /** Determines if an instruction can be issued to a given functional
+     *  unit pipeline. Returns true if the functional unit is capable of
+     *  executing the instruction's operation class, is not currently
+     *  busy, not stalled, and can insert the instruction without
+     *  delaying other queued instructions. Returns false otherwise. */
+    bool canFUIssueInst(MinorDynInstPtr inst, FUPipeline* fu, int fu_index);
+
+    /** Attempts to issue an instruction to a functional unit pipeline.
+     * Returns true if the instruction is issued correctly. Returns false
+     * otherwise */
+    bool tryIssueInstruction(ThreadID thread_id, const MinorDynInstPtr &inst,
+        unsigned int &fu_index, bool &discarded, bool &issued_mem_ref);
+
+
+
     /** Try and issue instructions from the inputBuffer */
     unsigned int issue(ThreadID thread_id);
 
