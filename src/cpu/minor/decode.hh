@@ -146,7 +146,59 @@ class Decode : public Named
         Latch<ForwardInstData>::Input out_,
         std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer);
 
+  protected:
+    /** Push input coming from input wire into input buffer */
+    void pushIntoInpBuffer();
+
+    /** Mark each thread as blocked if it cannot reserve any space in
+    * next stage */
+    void updateAllThreadsStatus();
+
+    /** Set inputindex to the next in order to process next input */
+    void advanceInput(ThreadID tid);
+
+    /** Set the pc to fetch the next micro instruction */
+    void setUpPcForMicroop(ThreadID tid, MinorDynInstPtr inst);
+
+    /** Extract a micro instruction from a macroop */
+    StaticInstPtr extractMicroInst(ThreadID tid, StaticInstPtr static_inst);
+
+    /** Create dynamic instruction from static decoded  micro instruction */
+    MinorDynInstPtr packInst(StaticInstPtr static_micro_inst,
+                InstId id, ThreadID tid);
+
+    /** Only allows last microop to contain a predicted next address */
+    void allowPredictionOnLastMicroop(StaticInstPtr static_micro_inst,
+                MinorDynInstPtr output_inst, MinorDynInstPtr macro_inst);
+
+    /** Perform a macroop decomposition into microop isntructions */
+    MinorDynInstPtr decomposition(ThreadID tid, MinorDynInstPtr inst,
+                unsigned int output_index);
+
+    /** Assign the ExecSeqNum to the instructino */
+    void assignExecSeqNum(ThreadID tid, MinorDynInstPtr output_inst);
+
+    /** Pack instruction into output wire */
+    void packIntoOutput(MinorDynInstPtr output_inst,
+                ForwardInstData &insts_out, unsigned int *output_index);
+
+    /** If the stage can process more than one input, it gets another line
+    * from the input buffer */
+    const ForwardInstData *maybeMoreInput(ThreadID tid,
+                const ForwardInstData *insts_in);
+
+    /** If some instruction has been produced it reserves space for it
+    * in the next stage */
+    void reserveSpaceInNextStage(ForwardInstData &insts_out, ThreadID tid);
+
+    /** Mark the stage as active */
+    void markStageActivity();
+
+    /** Push input buffer tail to make the buffer shift */
+    void pushTailInpBuffer();
+
   public:
+
     /** Pass on input/buffer data to the output if you can */
     void evaluate();
 

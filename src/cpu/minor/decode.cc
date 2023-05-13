@@ -125,22 +125,202 @@ dynInstAddTracing(MinorDynInstPtr inst, StaticInstPtr static_inst,
 #endif
 
 void
+Decode::pushIntoInpBuffer()
+{
+    if (!inp.outputWire->isBubble())
+        inputBuffer[inp.outputWire->threadId].setTail(*inp.outputWire);
+}
+
+void
+Decode::updateAllThreadsStatus()
+{
+    for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
+        decodeInfo[tid].blocked = !nextStageReserve[tid].canReserve();
+}
+
+void
+Decode::advanceInput(ThreadID tid)
+{
+    decodeInfo[tid].inputIndex++;
+    decodeInfo[tid].inMacroop = false;
+}
+
+void
+Decode::setUpPcForMicroop(ThreadID tid, MinorDynInstPtr inst)
+{
+    if (!decodeInfo[tid].inMacroop) {
+        set(decodeInfo[tid].microopPC, *inst->pc);
+        decodeInfo[tid].inMacroop = true;
+    }
+}
+
+StaticInstPtr
+Decode::extractMicroInst(ThreadID tid, StaticInstPtr static_inst)
+{
+    return static_inst->fetchMicroop(
+                                decodeInfo[tid].microopPC->microPC());
+}
+
+MinorDynInstPtr
+Decode::packInst(StaticInstPtr static_micro_inst, InstId id, ThreadID tid)
+{
+    MinorDynInstPtr output_inst = NULL;
+
+    output_inst = new MinorDynInst(static_micro_inst, id);
+    set(output_inst->pc, decodeInfo[tid].microopPC);
+    output_inst->fault = NoFault;
+
+    return output_inst;
+}
+
+void
+Decode::allowPredictionOnLastMicroop(
+    StaticInstPtr static_micro_inst,
+    MinorDynInstPtr output_inst,
+    MinorDynInstPtr macro_inst)
+{
+    if (!static_micro_inst->isLastMicroop()) return;
+
+    output_inst->predictedTaken = macro_inst->predictedTaken;
+    set(output_inst->predictedTarget,
+            macro_inst->predictedTarget);
+}
+
+MinorDynInstPtr
+Decode::decomposition(
+    ThreadID tid,
+    MinorDynInstPtr inst,
+    unsigned int output_index)
+{
+    /* Generate a new micro-op */
+    StaticInstPtr static_micro_inst;
+    StaticInstPtr static_inst = inst->staticInst;
+
+    /* Set up PC for the next micro-op emitted */
+    setUpPcForMicroop(tid, inst);
+
+    /* Get the micro-op static instruction from the
+        * static_inst. */
+    static_micro_inst = extractMicroInst(tid, static_inst);
+
+    MinorDynInstPtr output_inst = packInst(static_micro_inst, inst->id, tid);
+
+    /* Allow a predicted next address only on the last
+        *  microop */
+    allowPredictionOnLastMicroop(static_micro_inst, output_inst, inst);
+
+    DPRINTF(Decode, "Microop decomposition inputIndex:"
+        " %d output_index: %d lastMicroop: %s microopPC:"
+        " %s inst: %d\n",
+        decodeInfo[tid].inputIndex, output_index,
+        (static_micro_inst->isLastMicroop() ?
+            "true" : "false"),
+        *decodeInfo[tid].microopPC,
+        *output_inst);
+
+    static_micro_inst->advancePC(*decodeInfo[tid].microopPC);
+
+    /* Step input if this is the last micro-op */
+    if (static_micro_inst->isLastMicroop()) {
+        advanceInput(tid);
+    }
+    return output_inst;
+}
+
+void
+Decode::assignExecSeqNum(ThreadID tid, MinorDynInstPtr output_inst)
+{
+    output_inst->id.execSeqNum = decodeInfo[tid].execSeqNum;
+    /* Step to next sequence number */
+    decodeInfo[tid].execSeqNum++;
+}
+
+void
+Decode::packIntoOutput(
+    MinorDynInstPtr output_inst,
+    ForwardInstData &insts_out,
+    unsigned int *output_index)
+{
+    /* Correctly size the output before writing */
+    if (*output_index == 0) {
+        insts_out.resize(outputWidth);
+    }
+
+    /* Push into output */
+    insts_out.insts[*output_index] = output_inst;
+
+    (*output_index) += 1;
+}
+
+const ForwardInstData *
+Decode::maybeMoreInput(ThreadID tid, const ForwardInstData *insts_in)
+{
+    if (decodeInfo[tid].inputIndex == insts_in->width()) {
+        /* If we have just been producing micro-ops, we *must* have
+            * got to the end of that for inputIndex to be pushed past
+            * insts_in->width() */
+        assert(!decodeInfo[tid].inMacroop);
+        popInput(tid);
+        insts_in = NULL;
+
+        if (processMoreThanOneInput) {
+            DPRINTF(Decode, "Wrapping\n");
+            insts_in = getInput(tid);
+        }
+    }
+
+    return insts_in;
+}
+
+void
+Decode::reserveSpaceInNextStage(ForwardInstData &insts_out, ThreadID tid)
+{
+    if (!insts_out.isBubble()) {
+        /* Note activity of following buffer */
+        cpu.activityRecorder->activity();
+        insts_out.threadId = tid;
+        nextStageReserve[tid].reserve();
+    }
+
+}
+
+void
+Decode::markStageActivity()
+{
+    for (ThreadID i = 0; i < cpu.numThreads; i++)
+    {
+        if (getInput(i) && nextStageReserve[i].canReserve()) {
+            cpu.activityRecorder->activateStage(Pipeline::DecodeStageId);
+            break;
+        }
+    }
+}
+
+void
+Decode::pushTailInpBuffer()
+{
+    if (!inp.outputWire->isBubble())
+        inputBuffer[inp.outputWire->threadId].pushTail();
+
+}
+
+void
 Decode::evaluate()
 {
     /* Push input onto appropriate input buffer */
-    if (!inp.outputWire->isBubble())
-        inputBuffer[inp.outputWire->threadId].setTail(*inp.outputWire);
+    pushIntoInpBuffer();
 
     ForwardInstData &insts_out = *out.inputWire;
 
     assert(insts_out.isBubble());
 
-    for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
-        decodeInfo[tid].blocked = !nextStageReserve[tid].canReserve();
+    /* Check if each thread can reserve in next stage */
+    updateAllThreadsStatus();
 
     ThreadID tid = getScheduledThread();
 
-    if (tid != InvalidThreadID) {
+    if (tid != InvalidThreadID)
+    {
         DecodeThreadInfo &decode_info = decodeInfo[tid];
         const ForwardInstData *insts_in = getInput(tid);
 
@@ -156,8 +336,7 @@ Decode::evaluate()
 
             if (inst->isBubble()) {
                 /* Skip */
-                decode_info.inputIndex++;
-                decode_info.inMacroop = false;
+                advanceInput(tid);
             } else {
                 StaticInstPtr static_inst = inst->staticInst;
                 /* Static inst of a macro-op above the output_inst */
@@ -166,103 +345,41 @@ Decode::evaluate()
 
                 if (inst->isFault()) {
                     DPRINTF(Decode, "Fault being passed: %d\n",
-                        inst->fault->name());
+                            inst->fault->name());
+                    advanceInput(tid);
 
-                    decode_info.inputIndex++;
-                    decode_info.inMacroop = false;
-                } else if (static_inst->isMacroop()) {
-                    /* Generate a new micro-op */
-                    StaticInstPtr static_micro_inst;
-
-                    /* Set up PC for the next micro-op emitted */
-                    if (!decode_info.inMacroop) {
-                        set(decode_info.microopPC, *inst->pc);
-                        decode_info.inMacroop = true;
-                    }
-
-                    /* Get the micro-op static instruction from the
-                     * static_inst. */
-                    static_micro_inst =
-                        static_inst->fetchMicroop(
-                                decode_info.microopPC->microPC());
-
-                    output_inst =
-                        new MinorDynInst(static_micro_inst, inst->id);
-                    set(output_inst->pc, decode_info.microopPC);
-                    output_inst->fault = NoFault;
-
-                    /* Allow a predicted next address only on the last
-                     *  microop */
-                    if (static_micro_inst->isLastMicroop()) {
-                        output_inst->predictedTaken = inst->predictedTaken;
-                        set(output_inst->predictedTarget,
-                                inst->predictedTarget);
-                    }
-
-                    DPRINTF(Decode, "Microop decomposition inputIndex:"
-                        " %d output_index: %d lastMicroop: %s microopPC:"
-                        " %s inst: %d\n",
-                        decode_info.inputIndex, output_index,
-                        (static_micro_inst->isLastMicroop() ?
-                            "true" : "false"),
-                        *decode_info.microopPC,
-                        *output_inst);
-
-                    /* Acknowledge that the static_inst isn't mine, it's my
-                     * parent macro-op's */
-                    parent_static_inst = static_inst;
-
-                    static_micro_inst->advancePC(*decode_info.microopPC);
-
-                    /* Step input if this is the last micro-op */
-                    if (static_micro_inst->isLastMicroop()) {
-                        decode_info.inputIndex++;
-                        decode_info.inMacroop = false;
-                    }
-                } else {
+                } else if (!static_inst->isMacroop()) {
                     /* Doesn't need decomposing, pass on instruction */
                     DPRINTF(Decode, "Passing on inst: %s inputIndex:"
                         " %d output_index: %d\n",
                         *output_inst, decode_info.inputIndex, output_index);
-
                     parent_static_inst = static_inst;
-
                     /* Step input */
-                    decode_info.inputIndex++;
-                    decode_info.inMacroop = false;
+                    advanceInput(tid);
+
+                } else {
+                    /* It is a macroop to decompose */
+                    output_inst = decomposition(tid, inst, output_index);
+                    /* Acknowledge that the static_inst isn't mine, it's my
+                     * parent macro-op's */
+                    parent_static_inst = static_inst;
                 }
 
-                /* Set execSeqNum of output_inst */
-                output_inst->id.execSeqNum = decode_info.execSeqNum;
                 /* Add tracing */
 #if TRACING_ON
                 dynInstAddTracing(output_inst, parent_static_inst, cpu);
 #endif
 
-                /* Step to next sequence number */
-                decode_info.execSeqNum++;
+                /* Set execSeqNum of output_inst and step to next
+                *  sequence number */
+                assignExecSeqNum(tid, output_inst);
 
-                /* Correctly size the output before writing */
-                if (output_index == 0) insts_out.resize(outputWidth);
-                /* Push into output */
-                insts_out.insts[output_index] = output_inst;
-                output_index++;
+                packIntoOutput(output_inst, insts_out, &output_index);
+
             }
 
             /* Have we finished with the input? */
-            if (decode_info.inputIndex == insts_in->width()) {
-                /* If we have just been producing micro-ops, we *must* have
-                 * got to the end of that for inputIndex to be pushed past
-                 * insts_in->width() */
-                assert(!decode_info.inMacroop);
-                popInput(tid);
-                insts_in = NULL;
-
-                if (processMoreThanOneInput) {
-                    DPRINTF(Decode, "Wrapping\n");
-                    insts_in = getInput(tid);
-                }
-            }
+            insts_in = maybeMoreInput(tid, insts_in);
         }
 
         /* The rest of the output (if any) should already have been packed
@@ -275,26 +392,15 @@ Decode::evaluate()
 
     /* If we generated output, reserve space for the result in the next stage
      *  and mark the stage as being active this cycle */
-    if (!insts_out.isBubble()) {
-        /* Note activity of following buffer */
-        cpu.activityRecorder->activity();
-        insts_out.threadId = tid;
-        nextStageReserve[tid].reserve();
-    }
+    reserveSpaceInNextStage(insts_out, tid);
 
     /* If we still have input to process and somewhere to put it,
      *  mark stage as active */
-    for (ThreadID i = 0; i < cpu.numThreads; i++)
-    {
-        if (getInput(i) && nextStageReserve[i].canReserve()) {
-            cpu.activityRecorder->activateStage(Pipeline::DecodeStageId);
-            break;
-        }
-    }
+    markStageActivity();
 
     /* Make sure the input (if any left) is pushed */
-    if (!inp.outputWire->isBubble())
-        inputBuffer[inp.outputWire->threadId].pushTail();
+    pushTailInpBuffer();
+
 }
 
 inline ThreadID

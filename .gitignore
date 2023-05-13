@@ -1,3 +1,4 @@
+.gitignore
 build
 parser.out
 parsetab.py
@@ -32,3 +33,6 @@ configs/example/memcheck.cfg
 configs/dram/lowp_sweep.cfg
 .pyenv
 .vscode
+o3-pipeview.out
+prova_riscv
+riscvo3
