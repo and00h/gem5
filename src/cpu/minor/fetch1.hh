@@ -323,6 +323,18 @@ class Fetch1 : public Named
     friend std::ostream &operator <<(std::ostream &os,
         Fetch1::FetchState state);
 
+    /** Change branch if needed following MinorCPU rules */
+    void processBranchesFromLaterStages(const BranchData &execute_branch,
+      const BranchData &fetch2_branch);
+
+    /** Try to fetch from currently scheduled process */
+    void fetchFromScheduledThread();
+
+    /** Delete no more needed fetch request or handle
+     * completed fetch */
+    void processCompletedFetchRequests(Fetch1::FetchRequestPtr response,
+      ForwardLineData &line_out);
+
     /** Start fetching from a new address. */
     void changeStream(const BranchData &branch);
 
