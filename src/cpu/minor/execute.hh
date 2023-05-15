@@ -381,6 +381,38 @@ class Execute : public Named
     /** Like the drain interface on SimObject */
     unsigned int drain();
     void drainResume();
+  /** Refactor methods */
+  private:
+   // Execute::commit()
+    void tryToHandleMemResponses(ExecuteThreadInfo &ex_info, bool discard_inst,
+      bool &committed_inst,
+      bool &completed_mem_ref,
+      bool &completed_inst,
+      MinorDynInstPtr inst,
+      LSQ::LSQRequestPtr mem_response,
+      BranchData &branch,
+      Fault &fault);
+
+    void checkIfEarlyMemIssuePossible(ExecuteThreadInfo &ex_info, MinorDynInstPtr inst, bool &try_to_commit, bool &early_memory_issue, bool &completed_inst, InstSeqNum head_exec_seq_num);
+    void checkIfCommitFromFUsPossible(const MinorDynInstPtr inst, bool &completed_inst, bool &try_to_commit, InstSeqNum head_exec_seq_num);
+    void checkExtraCommitDelay(ThreadID thread_id, MinorDynInstPtr inst);
+    bool tryCommit(ThreadID thread_id,
+      MinorDynInstPtr inst,
+      BranchData &branch, Fault &fault,
+      Cycles now,
+      bool discard_inst,
+      bool early_memory_issue,
+      bool committed_inst,
+      bool issued_mem_ref
+    );
+
+    void doCommitAccounting(MinorDynInstPtr inst, ExecuteThreadInfo &ex_info, unsigned int &num_insts_committed, unsigned int &num_mem_refs_committed, bool completed_mem_ref);
+    void finalizeCompletedInstruction(ThreadID thread_id, MinorDynInstPtr inst, ExecuteThreadInfo &ex_info, const Fault &fault, bool issued_mem_ref, bool committed_inst);
+
+    // Execute::commitInst()
+    void startMemRefExecution(MinorDynInstPtr inst, BranchData &branch, Fault &fault, gem5::ThreadContext *thread, bool early_memory_issue, bool &completed_inst, bool &completed_mem_issue);
+    void actuallyExecuteInst(MinorDynInstPtr inst, Fault &fault, ExecContext &context, gem5::ThreadContext *thread, bool &committed);
+    void checkSuspension(ThreadID thread_id, MinorDynInstPtr inst, gem5::ThreadContext *thread, BranchData &branch);
 };
 
 } // namespace minor
