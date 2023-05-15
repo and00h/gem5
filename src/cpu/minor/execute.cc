@@ -664,19 +664,13 @@ Execute::canFUIssueInst(MinorDynInstPtr inst, FUPipeline* fu,
         fu->provides(inst->staticInst->opClass()) : true);
 
     if (!fu_is_capable) {
-        DPRINTF(MinorExecute, "Can't issue as FU: %d
-            isn't capable\n", fu_index);
+        DPRINTF(MinorExecute, "Can't issue as FU: %d isn't capable\n", fu_index);
     } else if (fu->alreadyPushed()) {
-        DPRINTF(MinorExecute, "Can't issue as FU: %d
-            is already busy\n", fu_index);
+        DPRINTF(MinorExecute, "Can't issue as FU: %d is already busy\n", fu_index);
     } else if (fu->stalled) {
-        DPRINTF(MinorExecute, "Can't issue inst: %s
-            into FU: %d, it's stalled\n",
-            *inst, fu_index);
+        DPRINTF(MinorExecute, "Can't issue inst: %s into FU: %d, it's stalled\n", *inst, fu_index);
     } else if (!fu->canInsert()) {
-        DPRINTF(MinorExecute, "Can't issue inst: %s
-            to busy FU for another: %d cycles\n",
-            *inst, fu->cyclesBeforeInsert());
+        DPRINTF(MinorExecute, "Can't issue inst: %s to busy FU for another: %d cycles\n", *inst, fu->cyclesBeforeInsert());
     } else {
         ret = true;
     }
@@ -698,8 +692,7 @@ Execute::tryIssueInstruction(ThreadID thread_id,
     } else if (cpu.getContext(thread_id)->status() ==
             ThreadContext::Suspended) {
 
-        DPRINTF(MinorExecute, "Discarding inst: %s
-            from suspended thread\n", *inst);
+        DPRINTF(MinorExecute, "Discarding inst: %s from suspended thread\n", *inst);
         issued = true;
         discarded = true;
     } else if (inst->id.streamSeqNum != thread.streamSeqNum) {
@@ -1006,7 +999,9 @@ void Execute::startMemRefExecution(MinorDynInstPtr inst, BranchData &branch, Fau
     completed_mem_issue = completed_inst;
 }
 
-void Execute::actuallyExecuteInst(MinorDynInstPtr inst, Fault &fault, ExecContext &context, gem5::ThreadContext *thread, bool &committed) {
+void Execute::actuallyExecuteInst(ThreadID thread_id, MinorDynInstPtr inst, Fault &fault, gem5::ThreadContext *thread, bool &committed) {
+    ExecContext context(cpu, *cpu.threads[thread_id], *this, inst);
+
     fault = inst->staticInst->execute(&context,
         inst->traceData);
 
@@ -1133,36 +1128,9 @@ Execute::commitInst(MinorDynInstPtr inst, bool early_memory_issue,
          * backwards, so no other branches may evaluate this cycle*/
         completed_inst = false;
     } else {
-        ExecContext context(cpu, *cpu.threads[thread_id], *this, inst);
-
         DPRINTF(MinorExecute, "Committing inst: %s\n", *inst);
 
-        fault = inst->staticInst->execute(&context,
-            inst->traceData);
-
-        /* Set the predicate for tracing and dump */
-        if (inst->traceData)
-            inst->traceData->setPredicate(context.readPredicate());
-
-        committed = true;
-
-        if (fault != NoFault) {
-            if (inst->traceData) {
-                if (debug::ExecFaulting) {
-                    inst->traceData->setFaulting(true);
-                } else {
-                    delete inst->traceData;
-                    inst->traceData = NULL;
-                }
-            }
-
-            DPRINTF(MinorExecute, "Fault in execute of inst: %s fault: %s\n",
-                *inst, fault->name());
-            fault->invoke(thread, inst->staticInst);
-        }
-        ExecContext context(cpu, *cpu.threads[thread_id], inst);
-        // if (inst->isInst() && inst->staticInst->isControl())
-        actuallyExecuteInst(inst, fault, context, thread, committed);
+        actuallyExecuteInst(thread_id, inst, fault, thread, committed);
 
         doInstCommitAccounting(inst);
         tryToBranch(inst, fault, branch);
@@ -1175,11 +1143,6 @@ Execute::commitInst(MinorDynInstPtr inst, bool early_memory_issue,
         executeInfo[thread_id].lastPredictionSeqNum = inst->id.predictionSeqNum;
 
         /* Check to see if this instruction suspended the current thread. */
-        if (!inst->isFault() &&
-            thread->status() == ThreadContext::Suspended &&
-            branch.isBubble() && /* It didn't branch too */
-            !isInterrupted(thread_id)) /* Don't suspend if we have
-                interrupts */
         checkSuspension(thread_id, inst, thread, branch);
     }
 
@@ -1253,35 +1216,37 @@ Execute::checkIfEarlyMemIssuePossible(ExecuteThreadInfo &ex_info,
 void
 Execute::checkIfCommitFromFUsPossible(const MinorDynInstPtr inst, bool &completed_inst, bool &try_to_commit, InstSeqNum head_exec_seq_num)
 {
-    DPRINTF(MinorExecute, "Trying to commit from FUs\n");
+    if (!completed_inst && !inst->inLSQ) {
+        DPRINTF(MinorExecute, "Trying to commit from FUs\n");
 
-    /* Try to commit from a functional unit */
-    /* Is the head inst of the expected inst's FU actually the
-     *  expected inst? */
-    QueuedInst &fu_inst =
-        funcUnits[inst->fuIndex]->front();
-    InstSeqNum fu_inst_seq_num = fu_inst.inst->id.execSeqNum;
+        /* Try to commit from a functional unit */
+        /* Is the head inst of the expected inst's FU actually the
+         *  expected inst? */
+        QueuedInst &fu_inst =
+            funcUnits[inst->fuIndex]->front();
+        InstSeqNum fu_inst_seq_num = fu_inst.inst->id.execSeqNum;
 
-    if (fu_inst.inst->isBubble()) {
-        /* No instruction ready */
-        completed_inst = false;
-    } else if (fu_inst_seq_num != head_exec_seq_num) {
-        /* Past instruction: we must have already executed it
-         * in the same cycle and so the head inst isn't
-         * actually at the end of its pipeline
-         * Future instruction: handled above and only for
-         * mem refs on their way to the LSQ */
-    } else if (fu_inst.inst->id == inst->id)  {
-        /* All instructions can be committed if they have the
-         *  right execSeqNum and there are no in-flight
-         *  mem insts before us */
-        try_to_commit = true;
-        completed_inst = true;
+        if (fu_inst.inst->isBubble()) {
+            /* No instruction ready */
+            completed_inst = false;
+        } else if (fu_inst_seq_num != head_exec_seq_num) {
+            /* Past instruction: we must have already executed it
+             * in the same cycle and so the head inst isn't
+             * actually at the end of its pipeline
+             * Future instruction: handled above and only for
+             * mem refs on their way to the LSQ */
+        } else if (fu_inst.inst->id == inst->id)  {
+            /* All instructions can be committed if they have the
+             *  right execSeqNum and there are no in-flight
+             *  mem insts before us */
+            try_to_commit = true;
+            completed_inst = true;
+        }
     }
 }
 
 void
-Execute::checkExtraCommitDelay(ThreadID thread_id, MinorDynInstPtr inst) {
+Execute::checkExtraCommitDelay(ThreadID thread_id, MinorDynInstPtr const inst) {
     if (inst->extraCommitDelayExpr) {
         DPRINTF(MinorExecute, "Evaluating expression for"
             " extra commit delay inst: %s\n", *inst);
@@ -1315,7 +1280,7 @@ Execute::checkExtraCommitDelay(ThreadID thread_id, MinorDynInstPtr inst) {
 }
 
 bool Execute::tryCommit(ThreadID thread_id,
-    MinorDynInstPtr inst,
+    const MinorDynInstPtr inst,
     BranchData &branch, Fault &fault,
     Cycles now,
     bool discard_inst,
@@ -1377,7 +1342,7 @@ bool Execute::tryCommit(ThreadID thread_id,
 }
 
 void
-Execute::doCommitAccounting(MinorDynInstPtr inst, ExecuteThreadInfo &ex_info, unsigned int &num_insts_committed, unsigned int &num_mem_refs_committed, bool completed_mem_ref)
+Execute::doCommitAccounting(MinorDynInstPtr const inst, ExecuteThreadInfo &ex_info, unsigned int &num_insts_committed, unsigned int &num_mem_refs_committed, bool completed_mem_ref)
 {
     bool is_no_cost_inst = inst->isNoCostInst();
 
@@ -1408,7 +1373,7 @@ Execute::doCommitAccounting(MinorDynInstPtr inst, ExecuteThreadInfo &ex_info, un
 }
 
 void
-Execute::finalizeCompletedInstruction(ThreadID thread_id, MinorDynInstPtr inst, ExecuteThreadInfo &ex_info, const Fault &fault, bool issued_mem_ref, bool committed_inst)
+Execute::finalizeCompletedInstruction(ThreadID thread_id, const MinorDynInstPtr inst, ExecuteThreadInfo &ex_info, const Fault &fault, bool issued_mem_ref, bool committed_inst)
 {
     /* Pop issued (to LSQ) and discarded mem refs from the inFUMemInsts
      *  as they've *definitely* exited the FUs */
@@ -1418,21 +1383,35 @@ Execute::finalizeCompletedInstruction(ThreadID thread_id, MinorDynInstPtr inst, 
         if (!ex_info.inFUMemInsts->empty() &&
             ex_info.inFUMemInsts->front().inst == inst)
         {
-            auto &resume_pc = cpu.getContext(thread_id)->pcState();
-
-            assert(resume_pc.microPC() == 0);
-
-            DPRINTF(MinorInterrupt, "Suspending thread: %d from Execute"
-                " inst: %s\n", thread_id, *inst);
-
-            cpu.stats.numFetchSuspends++;
-
-            updateBranchData(thread_id, BranchData::SuspendThread, inst,
-                resume_pc, branch);
+            ex_info.inFUMemInsts->pop();
         }
     }
 
-    return completed_inst;
+    if (!issued_mem_ref || fault != NoFault) {
+        /* Note that this includes discarded insts */
+        DPRINTF(MinorExecute, "Completed inst: %s\n", *inst);
+
+        /* Got to the end of a full instruction? */
+        ex_info.lastCommitWasEndOfMacroop = inst->isFault() ||
+            inst->isLastOpInInst();
+
+        /* lastPredictionSeqNum is kept as a convenience to prevent its
+         *  value from changing too much on the minorview display */
+        ex_info.lastPredictionSeqNum = inst->id.predictionSeqNum;
+
+        /* Finished with the inst, remove it from the inst queue and
+         *  clear its dependencies */
+        ex_info.inFlightInsts->pop();
+
+        /* Complete barriers in the LSQ/move to store buffer */
+        if (inst->isInst() && inst->staticInst->isFullMemBarrier()) {
+            DPRINTF(MinorMem, "Completing memory barrier"
+                " inst: %s committed: %d\n", *inst, committed_inst);
+            lsq.completeMemBarrierInst(inst, committed_inst);
+        }
+
+        scoreboard[thread_id].clearInstDests(inst, inst->isMemRef());
+    }
 }
 
 void
@@ -1547,27 +1526,7 @@ Execute::commit(ThreadID thread_id,
         } else if (mem_response &&
             num_mem_refs_committed < memoryCommitLimit)
         {
-            /* Try to commit from the memory responses next */
-            discard_inst = inst->id.streamSeqNum !=
-                           ex_info.streamSeqNum || discard;
-
-            DPRINTF(MinorExecute, "Trying to commit mem response: %s\n",
-                *inst);
-
-            /* Complete or discard the response */
-            if (discard_inst) {
-                DPRINTF(MinorExecute, "Discarding mem inst: %s as its"
-                    " stream state was unexpected, expected: %d\n",
-                    *inst, ex_info.streamSeqNum);
-
-                lsq.popResponse(mem_response);
-            } else {
-                handleMemResponse(inst, mem_response, branch, fault);
-                committed_inst = true;
-            }
-
-            completed_mem_ref = true;
-            completed_inst = true;
+            tryToHandleMemResponses(ex_info, discard_inst, committed_inst, completed_mem_ref, completed_inst, inst, mem_response, branch, fault);
         } else if (can_commit_insts) {
             /* If true, this instruction will, subject to timing tweaks,
              *  be considered for completion.  try_to_commit flattens
@@ -1600,33 +1559,7 @@ Execute::commit(ThreadID thread_id,
 
             /* Try to issue from the ends of FUs and the inFlightInsts
              *  queue */
-            if (!completed_inst && !inst->inLSQ) {
-                DPRINTF(MinorExecute, "Trying to commit from FUs\n");
-
-                /* Try to commit from a functional unit */
-                /* Is the head inst of the expected inst's FU actually the
-                 *  expected inst? */
-                QueuedInst &fu_inst =
-                    funcUnits[inst->fuIndex]->front();
-                InstSeqNum fu_inst_seq_num = fu_inst.inst->id.execSeqNum;
-
-                if (fu_inst.inst->isBubble()) {
-                    /* No instruction ready */
-                    completed_inst = false;
-                } else if (fu_inst_seq_num != head_exec_seq_num) {
-                    /* Past instruction: we must have already executed it
-                     * in the same cycle and so the head inst isn't
-                     * actually at the end of its pipeline
-                     * Future instruction: handled above and only for
-                     * mem refs on their way to the LSQ */
-                } else if (fu_inst.inst->id == inst->id)  {
-                    /* All instructions can be committed if they have the
-                     *  right execSeqNum and there are no in-flight
-                     *  mem insts before us */
-                    try_to_commit = true;
-                    completed_inst = true;
-                }
-            }
+            checkIfCommitFromFUsPossible(inst, completed_inst, try_to_commit, head_exec_seq_num);
 
             if (try_to_commit) {
                 discard_inst = inst->id.streamSeqNum !=
@@ -1661,73 +1594,13 @@ Execute::commit(ThreadID thread_id,
             inst->fuIndex = 0;
             inst->inLSQ = true;
         }
-
-        /* Pop issued (to LSQ) and discarded mem refs from the inFUMemInsts
-         *  as they've *definitely* exited the FUs */
-        if (completed_inst && inst->isMemRef()) {
-            /* The MemRef could have been discarded from the FU or the memory
-             *  queue, so just check an FU instruction */
-            if (!ex_info.inFUMemInsts->empty() &&
-                ex_info.inFUMemInsts->front().inst == inst)
-            {
-                ex_info.inFUMemInsts->pop();
-            }
-        }
-
-        if (completed_inst && !(issued_mem_ref && fault == NoFault)) {
-            /* Note that this includes discarded insts */
-            DPRINTF(MinorExecute, "Completed inst: %s\n", *inst);
-
-            /* Got to the end of a full instruction? */
-            ex_info.lastCommitWasEndOfMacroop = inst->isFault() ||
-                inst->isLastOpInInst();
-
-            /* lastPredictionSeqNum is kept as a convenience to prevent its
-             *  value from changing too much on the minorview display */
-            ex_info.lastPredictionSeqNum = inst->id.predictionSeqNum;
-
-            /* Finished with the inst, remove it from the inst queue and
-             *  clear its dependencies */
-            ex_info.inFlightInsts->pop();
-
-            /* Complete barriers in the LSQ/move to store buffer */
-            if (inst->isInst() && inst->staticInst->isFullMemBarrier()) {
-                DPRINTF(MinorMem, "Completing memory barrier"
-                    " inst: %s committed: %d\n", *inst, committed_inst);
-                lsq.completeMemBarrierInst(inst, committed_inst);
-            }
-
-            scoreboard[thread_id].clearInstDests(inst, inst->isMemRef());
+        if (completed_inst) {
+            finalizeCompletedInstruction(thread_id, inst, ex_info, fault, issued_mem_ref, committed_inst);
         }
 
         /* Handle per-cycle instruction counting */
         if (committed_inst) {
-            bool is_no_cost_inst = inst->isNoCostInst();
-
-            /* Don't show no cost instructions as having taken a commit
-             *  slot */
-            if (debug::MinorTrace && !is_no_cost_inst)
-                ex_info.instsBeingCommitted.insts[num_insts_committed] = inst;
-
-            if (!is_no_cost_inst)
-                num_insts_committed++;
-
-            if (num_insts_committed == commitLimit)
-                DPRINTF(MinorExecute, "Reached inst commit limit\n");
-
-            /* Re-set the time of the instruction if that's required for
-             * tracing */
-            if (inst->traceData) {
-                if (setTraceTimeOnCommit)
-                    inst->traceData->setWhen(curTick());
-                inst->traceData->dump();
-            }
-
-            if (completed_mem_ref)
-                num_mem_refs_committed++;
-
-            if (num_mem_refs_committed == memoryCommitLimit)
-                DPRINTF(MinorExecute, "Reached mem ref commit limit\n");
+            doCommitAccounting(inst, ex_info, num_insts_committed, num_mem_refs_committed, completed_mem_ref);
         }
     }
 }

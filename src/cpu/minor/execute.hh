@@ -384,6 +384,7 @@ class Execute : public Named
   /** Refactor methods */
   private:
    // Execute::commit()
+   /** Tries to commit memory responses (or discard them) */
     void tryToHandleMemResponses(ExecuteThreadInfo &ex_info, bool discard_inst,
       bool &committed_inst,
       bool &completed_mem_ref,
@@ -393,11 +394,25 @@ class Execute : public Named
       BranchData &branch,
       Fault &fault);
 
+    /** Checks if an early memory issue is possible. If it is, sets completed_inst to true
+     * and sets inst to the instruction corresponding to the memory issue, so that it may be
+     * later committed.
+     */
     void checkIfEarlyMemIssuePossible(ExecuteThreadInfo &ex_info, MinorDynInstPtr inst, bool &try_to_commit, bool &early_memory_issue, bool &completed_inst, InstSeqNum head_exec_seq_num);
+
+    /** Check if the instruction has reached the end of a FU and can be committed.
+     * If it is, set try_to_commit and completed_inst to true
+     */
     void checkIfCommitFromFUsPossible(const MinorDynInstPtr inst, bool &completed_inst, bool &try_to_commit, InstSeqNum head_exec_seq_num);
-    void checkExtraCommitDelay(ThreadID thread_id, MinorDynInstPtr inst);
+    /** Check if the instruction needs further delay to commit. */
+    void checkExtraCommitDelay(ThreadID thread_id, MinorDynInstPtr const inst);
+
+    /** Actually try to commit the instruction. Commit fails if there are incomplete memory barriers
+     * there is extra commit delay to account for (see checkExtraCommitDelay) or commitInst returns false.
+     * If the instruction has been completed, unstall its functional unit.
+    */
     bool tryCommit(ThreadID thread_id,
-      MinorDynInstPtr inst,
+      const MinorDynInstPtr inst,
       BranchData &branch, Fault &fault,
       Cycles now,
       bool discard_inst,
@@ -406,12 +421,20 @@ class Execute : public Named
       bool issued_mem_ref
     );
 
-    void doCommitAccounting(MinorDynInstPtr inst, ExecuteThreadInfo &ex_info, unsigned int &num_insts_committed, unsigned int &num_mem_refs_committed, bool completed_mem_ref);
-    void finalizeCompletedInstruction(ThreadID thread_id, MinorDynInstPtr inst, ExecuteThreadInfo &ex_info, const Fault &fault, bool issued_mem_ref, bool committed_inst);
+    /** Update commit statistics */
+    void doCommitAccounting(MinorDynInstPtr const inst, ExecuteThreadInfo &ex_info, unsigned int &num_insts_committed, unsigned int &num_mem_refs_committed, bool completed_mem_ref);
+    /** Final commit operations. Pop the instruction from the queue of instructions in memory FUs (if it was a memory instruction),
+     * pop the instruction from the queue of in-flight instructions (if it wasn't a memory instruction), complete the memory
+     * barrier (if it was a memory barrier instruction) and update the scoreboard.
+    */
+    void finalizeCompletedInstruction(ThreadID thread_id, const MinorDynInstPtr inst, ExecuteThreadInfo &ex_info, const Fault &fault, bool issued_mem_ref, bool committed_inst);
 
     // Execute::commitInst()
+    /** Calculate the effective address and issue the access to memory */
     void startMemRefExecution(MinorDynInstPtr inst, BranchData &branch, Fault &fault, gem5::ThreadContext *thread, bool early_memory_issue, bool &completed_inst, bool &completed_mem_issue);
-    void actuallyExecuteInst(MinorDynInstPtr inst, Fault &fault, ExecContext &context, gem5::ThreadContext *thread, bool &committed);
+    /** Perform the actual execution of the instruction. If a fault happened, invoke it. */
+    void actuallyExecuteInst(ThreadID thread_id, MinorDynInstPtr inst, Fault &fault, gem5::ThreadContext *thread, bool &committed);
+    /** Check if the thread has been suspended. */
     void checkSuspension(ThreadID thread_id, MinorDynInstPtr inst, gem5::ThreadContext *thread, BranchData &branch);
 };
 
