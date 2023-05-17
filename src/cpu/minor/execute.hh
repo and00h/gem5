@@ -398,7 +398,7 @@ class Execute : public Named
      * and sets inst to the instruction corresponding to the memory issue, so that it may be
      * later committed.
      */
-    void checkIfEarlyMemIssuePossible(ExecuteThreadInfo &ex_info, MinorDynInstPtr inst, bool &try_to_commit, bool &early_memory_issue, bool &completed_inst, InstSeqNum head_exec_seq_num);
+    void checkIfEarlyMemIssuePossible(ExecuteThreadInfo &ex_info, MinorDynInstPtr* inst, bool &try_to_commit, bool &early_memory_issue, bool &completed_inst, InstSeqNum head_exec_seq_num);
 
     /** Check if the instruction has reached the end of a FU and can be committed.
      * If it is, set try_to_commit and completed_inst to true

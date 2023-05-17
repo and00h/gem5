@@ -1181,7 +1181,7 @@ Execute::tryToHandleMemResponses(
 
 void
 Execute::checkIfEarlyMemIssuePossible(ExecuteThreadInfo &ex_info,
-            MinorDynInstPtr inst,
+            MinorDynInstPtr* inst,
             bool &try_to_commit,
             bool &early_memory_issue,
             bool &completed_inst,
@@ -1205,8 +1205,8 @@ Execute::checkIfEarlyMemIssuePossible(ExecuteThreadInfo &ex_info,
          DPRINTF(MinorExecute, "Issuing mem ref early"
              " inst: %s instToWaitFor: %d\n",
              *(fu_inst), fu_inst->instToWaitFor);
-
-        inst = fu_inst;
+        DPRINTF(MinorExecute, "Early mem ref %s\n", fu_inst->staticInst->disassemble(fu_inst->pc.get()->instAddr()).c_str());
+        *inst = fu_inst;
         try_to_commit = true;
         early_memory_issue = true;
         completed_inst = true;
@@ -1526,6 +1526,8 @@ Execute::commit(ThreadID thread_id,
         } else if (mem_response &&
             num_mem_refs_committed < memoryCommitLimit)
         {
+            discard_inst = inst->id.streamSeqNum !=
+                           ex_info.streamSeqNum || discard;
             tryToHandleMemResponses(ex_info, discard_inst, committed_inst, completed_mem_ref, completed_inst, inst, mem_response, branch, fault);
         } else if (can_commit_insts) {
             /* If true, this instruction will, subject to timing tweaks,
@@ -1544,9 +1546,30 @@ Execute::commit(ThreadID thread_id,
              *  issue below to handle them.
              */
             if (!ex_info.inFUMemInsts->empty() && lsq.canRequest()) {
-                checkIfEarlyMemIssuePossible(ex_info, inst, try_to_commit,
-                                early_memory_issue, completed_inst,
-                                head_exec_seq_num);
+                DPRINTF(MinorExecute, "Trying to commit from mem FUs\n");
+
+                const MinorDynInstPtr head_mem_ref_inst =
+                    ex_info.inFUMemInsts->front().inst;
+                FUPipeline *fu = funcUnits[head_mem_ref_inst->fuIndex];
+                const MinorDynInstPtr &fu_inst = fu->front().inst;
+
+                /* Use this, possibly out of order, inst as the one
+                 *  to 'commit'/send to the LSQ */
+                if (!fu_inst->isBubble() &&
+                    !fu_inst->inLSQ &&
+                    fu_inst->canEarlyIssue &&
+                    ex_info.streamSeqNum == fu_inst->id.streamSeqNum &&
+                    head_exec_seq_num > fu_inst->instToWaitFor)
+                {
+                    DPRINTF(MinorExecute, "Issuing mem ref early"
+                        " inst: %s instToWaitFor: %d\n",
+                        *(fu_inst), fu_inst->instToWaitFor);
+
+                    inst = fu_inst;
+                    try_to_commit = true;
+                    early_memory_issue = true;
+                    completed_inst = true;
+                }
             }
 
             /* Try and commit FU-less insts */
@@ -1564,11 +1587,83 @@ Execute::commit(ThreadID thread_id,
             if (try_to_commit) {
                 discard_inst = inst->id.streamSeqNum !=
                     ex_info.streamSeqNum || discard;
+                
+                /* Is this instruction discardable as its streamSeqNum
+                 *  doesn't match? */
+                if (!discard_inst) {
+                    /* Try to commit or discard a non-memory instruction.
+                     *  Memory ops are actually 'committed' from this FUs
+                     *  and 'issued' into the memory system so we need to
+                     *  account for them later (commit_was_mem_issue gets
+                     *  set) */
+                    if (inst->extraCommitDelayExpr) {
+                        DPRINTF(MinorExecute, "Evaluating expression for"
+                            " extra commit delay inst: %s\n", *inst);
 
-                completed_inst = tryCommit(thread_id, inst,
-                    branch, fault, now,
-                    discard_inst, early_memory_issue,
-                    committed_inst, issued_mem_ref);
+                        ThreadContext *thread = cpu.getContext(thread_id);
+
+                        TimingExprEvalContext context(inst->staticInst,
+                            thread, NULL);
+
+                        uint64_t extra_delay = inst->extraCommitDelayExpr->
+                            eval(context);
+
+                        DPRINTF(MinorExecute, "Extra commit delay expr"
+                            " result: %d\n", extra_delay);
+
+                        if (extra_delay < 128) {
+                            inst->extraCommitDelay += Cycles(extra_delay);
+                        } else {
+                            DPRINTF(MinorExecute, "Extra commit delay was"
+                                " very long: %d\n", extra_delay);
+                        }
+                        inst->extraCommitDelayExpr = NULL;
+                    }
+
+                    /* Move the extraCommitDelay from the instruction
+                     *  into the minimumCommitCycle */
+                    if (inst->extraCommitDelay != Cycles(0)) {
+                        inst->minimumCommitCycle = cpu.curCycle() +
+                            inst->extraCommitDelay;
+                        inst->extraCommitDelay = Cycles(0);
+                    }
+
+                    /* @todo Think about making lastMemBarrier be
+                     *  MAX_UINT_64 to avoid using 0 as a marker value */
+                    if (!inst->isFault() && inst->isMemRef() &&
+                        lsq.getLastMemBarrier(thread_id) <
+                            inst->id.execSeqNum &&
+                        lsq.getLastMemBarrier(thread_id) != 0)
+                    {
+                        DPRINTF(MinorExecute, "Not committing inst: %s yet"
+                            " as there are incomplete barriers in flight\n",
+                            *inst);
+                        completed_inst = false;
+                    } else if (inst->minimumCommitCycle > now) {
+                        DPRINTF(MinorExecute, "Not committing inst: %s yet"
+                            " as it wants to be stalled for %d more cycles\n",
+                            *inst, inst->minimumCommitCycle - now);
+                        completed_inst = false;
+                    } else {
+                        completed_inst = commitInst(inst,
+                            early_memory_issue, branch, fault,
+                            committed_inst, issued_mem_ref);
+                    }
+                } else {
+                    /* Discard instruction */
+                    completed_inst = true;
+                }
+
+                if (completed_inst) {
+                    /* Allow the pipeline to advance.  If the FU head
+                     *  instruction wasn't the inFlightInsts head
+                     *  but had already been committed, it would have
+                     *  unstalled the pipeline before here */
+                    if (inst->fuIndex != noCostFUIndex) {
+                        DPRINTF(MinorExecute, "Unstalling %d for inst %s\n", inst->fuIndex, inst->id);
+                        funcUnits[inst->fuIndex]->stalled = false;
+                    }
+                }
             }
         } else {
             DPRINTF(MinorExecute, "No instructions to commit\n");

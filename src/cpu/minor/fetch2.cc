@@ -571,7 +571,6 @@ Fetch2::pushTailInpBuffer()
     }
 }
 
-
 void
 Fetch2::evaluate()
 {
@@ -650,11 +649,100 @@ Fetch2::evaluate()
                 DPRINTF(Fetch, "Fault being passed output_index: "
                     "%d: %s\n", output_index, dyn_inst->fault->name());
             } else {
-                dyn_inst = decodeIfReadyAndPredict(tid,
-                                                    line_in,
-                                                    decoder,
-                                                    prediction,
-                                                    output_index);
+                uint8_t *line = line_in->line;
+
+                /* The instruction is wholly in the line, can just copy. */
+                memcpy(decoder->moreBytesPtr(), line + fetch_info.inputIndex,
+                        decoder->moreBytesSize());
+
+                if (!decoder->instReady()) {
+                    decoder->moreBytes(*fetch_info.pc,
+                        line_in->lineBaseAddr + fetch_info.inputIndex);
+                    DPRINTF(Fetch, "Offering MachInst to decoder addr: 0x%x\n",
+                            line_in->lineBaseAddr + fetch_info.inputIndex);
+                }
+
+                /* Maybe make the above a loop to accomodate ISAs with
+                 *  instructions longer than sizeof(MachInst) */
+
+                if (decoder->instReady()) {
+                    /* Note that the decoder can update the given PC.
+                     *  Remember not to assign it until *after* calling
+                     *  decode */
+                    StaticInstPtr decoded_inst =
+                        decoder->decode(*fetch_info.pc);
+
+                    /* Make a new instruction and pick up the line, stream,
+                     *  prediction, thread ids from the incoming line */
+                    dyn_inst = new MinorDynInst(decoded_inst, line_in->id);
+
+                    /* Fetch and prediction sequence numbers originate here */
+                    dyn_inst->id.fetchSeqNum = fetch_info.fetchSeqNum;
+                    dyn_inst->id.predictionSeqNum = fetch_info.predictionSeqNum;
+                    /* To complete the set, test that exec sequence number
+                     *  has not been set */
+                    assert(dyn_inst->id.execSeqNum == 0);
+
+                    set(dyn_inst->pc, fetch_info.pc);
+                    DPRINTF(Fetch, "decoder inst %s\n", *dyn_inst);
+
+                    // Collect some basic inst class stats
+                    if (decoded_inst->isLoad())
+                        stats.loadInstructions++;
+                    else if (decoded_inst->isStore())
+                        stats.storeInstructions++;
+                    else if (decoded_inst->isAtomic())
+                        stats.amoInstructions++;
+                    else if (decoded_inst->isVector())
+                        stats.vecInstructions++;
+                    else if (decoded_inst->isFloating())
+                        stats.fpInstructions++;
+                    else if (decoded_inst->isInteger())
+                        stats.intInstructions++;
+
+                    DPRINTF(Fetch, "Instruction extracted from line %s"
+                        " lineWidth: %d output_index: %d inputIndex: %d"
+                        " pc: %s inst: %s\n",
+                        line_in->id,
+                        line_in->lineWidth, output_index, fetch_info.inputIndex,
+                        *fetch_info.pc, *dyn_inst);
+
+                    /*
+                     * In SE mode, it's possible to branch to a microop when
+                     * replaying faults such as page faults (or simply
+                     * intra-microcode branches in X86).  Unfortunately,
+                     * as Minor has micro-op decomposition in a separate
+                     * pipeline stage from instruction decomposition, the
+                     * following advancePC (which may follow a branch with
+                     * microPC() != 0) *must* see a fresh macroop.
+                     *
+                     * X86 can branch within microops so we need to deal with
+                     * the case that, after a branch, the first un-advanced PC
+                     * may be pointing to a microop other than 0.  Once
+                     * advanced, however, the microop number *must* be 0
+                     */
+                    fetch_info.pc->uReset();
+
+                    /* Advance PC for the next instruction */
+                    decoded_inst->advancePC(*fetch_info.pc);
+
+                    /* Predict any branches and issue a branch if
+                     *  necessary */
+                    predictBranch(dyn_inst, prediction);
+                } else {
+                    DPRINTF(Fetch, "Inst not ready yet\n");
+                }
+
+                /* Step on the pointer into the line if there's no
+                 *  complete instruction waiting */
+                if (decoder->needMoreBytes()) {
+                    fetch_info.inputIndex += decoder->moreBytesSize();
+
+                DPRINTF(Fetch, "Updated inputIndex value PC: %s"
+                    " inputIndex: 0x%x lineBaseAddr: 0x%x lineWidth: 0x%x\n",
+                    *line_in->pc, fetch_info.inputIndex, line_in->lineBaseAddr,
+                    line_in->lineWidth);
+                }
             }
 
             if (dyn_inst) {
