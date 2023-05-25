@@ -78,15 +78,17 @@ class Pipeline : public Ticked
     /** Allow cycles to be skipped when the pipeline is idle */
     bool allow_idling;
 
-    Latch<ForwardLineData> f1ToF2;
-    Latch<BranchData> f2ToF1;
-    Latch<ForwardInstData> f2ToD;
+    //Latch<ForwardLineData> f1ToF2;
+    Latch<ForwardLineData> f1ToD;
+    //Latch<BranchData> f2ToF1;
+    Latch<BranchData> dToF1;
+    //Latch<ForwardInstData> f2ToD;
     Latch<ForwardInstData> dToE;
     Latch<BranchData> eToF1;
 
     Execute execute;
     Decode decode;
-    Fetch2 fetch2;
+    //Fetch2 fetch2;
     Fetch1 fetch1;
 
     /** Activity recording for the pipeline.  This is access through the CPU

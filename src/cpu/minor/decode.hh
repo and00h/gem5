@@ -52,6 +52,8 @@
 #include "cpu/minor/cpu.hh"
 #include "cpu/minor/dyn_inst.hh"
 #include "cpu/minor/pipe_data.hh"
+#include "cpu/pred/bpred_unit.hh"
+#include "params/BaseMinorCPU.hh"
 
 namespace gem5
 {
@@ -70,8 +72,16 @@ class Decode : public Named
     /** Pointer back to the containing CPU */
     MinorCPU &cpu;
 
-    /** Input port carrying macro instructions from Fetch2 */
-    Latch<ForwardInstData>::Output inp;
+    /** Input port carrying macro instructions from Fetch1 */
+    Latch<ForwardLineData>::Output inp;
+
+    /** Input port carrying branches from Execute.  This is a snoop of the
+     *  data provided to F1. */
+    Latch<BranchData>::Output branchInp;
+
+    /** Output port carrying predictions back to Fetch1 */
+    Latch<BranchData>::Input predictionOut;
+
     /** Output port carrying micro-op decomposed instructions to Execute */
     Latch<ForwardInstData>::Input out;
 
@@ -85,9 +95,20 @@ class Decode : public Named
      *  there is room in the output to contain its processed data */
     bool processMoreThanOneInput;
 
+    /** Branch predictor passed from Python configuration */
+    branch_prediction::BPredUnit &branchPredictor;
+
+    /** True when there are still microinstructions to extract from a
+     *  macroinstruction and to be packed into output */
+    bool macroInstPending = false;
+
+    /** Pointer to the macroinstruction that needs further 
+     * decomposition */
+    MinorDynInstPtr macroInstPendingPtr = NULL;
+
   public:
-    /* Public for Pipeline to be able to pass it to Fetch2 */
-    std::vector<InputBuffer<ForwardInstData>> inputBuffer;
+    /* Public for Pipeline to be able to pass it to Fetch1 */
+    std::vector<InputBuffer<ForwardLineData>> inputBuffer;
 
   protected:
     /** Data members after this line are cycle-to-cycle state */
@@ -98,10 +119,15 @@ class Decode : public Named
 
         DecodeThreadInfo(const DecodeThreadInfo& other) :
             inputIndex(other.inputIndex),
+            havePC(other.havePC),
+            lastStreamSeqNum(other.lastStreamSeqNum),
+            expectedStreamSeqNum(other.expectedStreamSeqNum),
+            predictionSeqNum(other.predictionSeqNum),
             inMacroop(other.inMacroop),
             execSeqNum(other.execSeqNum),
             blocked(other.blocked)
         {
+            set(pc, other.pc);
             set(microopPC, other.microopPC);
         }
 
@@ -109,6 +135,38 @@ class Decode : public Named
         /** Index into the inputBuffer's head marking the start of unhandled
          *  instructions */
         unsigned int inputIndex = 0;
+
+        /** Remembered program counter value.  Between contiguous lines, this
+         *  is just updated with advancePC.  For lines following changes of
+         *  stream, a new PC must be loaded and havePC be set.
+         *  havePC is needed to accomodate instructions which span across
+         *  lines meaning that Decode and the decoder need to remember a PC
+         *  value and a partially-offered instruction from the previous line */
+        std::unique_ptr<PCStateBase> pc;
+
+        /** PC is currently valid.  Initially false, gets set to true when a
+         *  change-of-stream line is received and false again when lines are
+         *  discarded for any reason */
+        bool havePC = false;
+
+        /** Stream sequence number of the last seen line used to identify
+         *  changes of instruction stream */
+        InstSeqNum lastStreamSeqNum = InstId::firstStreamSeqNum;
+
+        /** Fetch2 is the source of fetch sequence numbers.  These represent the
+         *  sequence that instructions were extracted from fetched lines. */
+        InstSeqNum fetchSeqNum = InstId::firstFetchSeqNum;
+
+        /** Stream sequence number remembered from last time the
+         *  predictionSeqNum changed.  Lines should only be discarded when their
+         *  predictionSeqNums disagree with Fetch2::predictionSeqNum *and* they
+         *  are from the same stream that bore that prediction number */
+        InstSeqNum expectedStreamSeqNum = InstId::firstStreamSeqNum;
+
+        /** Fetch2 is the source of prediction sequence numbers.  These
+         *  represent predicted changes of control flow sources from branch
+         *  prediction in Fetch2. */
+        InstSeqNum predictionSeqNum = InstId::firstPredictionSeqNum;
 
         /** True when we're in the process of decomposing a micro-op and
          *  microopPC will be valid.  This is only the case when there isn't
@@ -123,26 +181,55 @@ class Decode : public Named
 
         /** Blocked indication for report */
         bool blocked = false;
+
     };
 
     std::vector<DecodeThreadInfo> decodeInfo;
     ThreadID threadPriority;
 
+    struct DecodeStats : public statistics::Group
+    {
+        DecodeStats(MinorCPU *cpu);
+        /** Stats */
+        statistics::Scalar intInstructions;
+        statistics::Scalar fpInstructions;
+        statistics::Scalar vecInstructions;
+        statistics::Scalar loadInstructions;
+        statistics::Scalar storeInstructions;
+        statistics::Scalar amoInstructions;
+    } stats;
+
   protected:
     /** Get a piece of data to work on, or 0 if there is no data. */
-    const ForwardInstData *getInput(ThreadID tid);
+    const ForwardLineData *getInput(ThreadID tid);
 
     /** Pop an element off the input buffer, if there are any */
     void popInput(ThreadID tid);
 
+    /** Dump the whole contents of the input buffer.  Useful after a
+     *  prediction changes control flow */
+    void dumpAllInput(ThreadID tid);
+
+    /** Update local branch prediction structures from feedback from
+     *  Execute. */
+    void updateBranchPrediction(const BranchData &branch);
+
+    /** Predicts branches for the given instruction.  Updates the
+     *  instruction's predicted... fields and also the branch which
+     *  carries the prediction to Fetch1 */
+    void predictBranch(MinorDynInstPtr inst, BranchData &branch);
+
     /** Use the current threading policy to determine the next thread to
      *  decode from. */
     ThreadID getScheduledThread();
+
   public:
     Decode(const std::string &name,
         MinorCPU &cpu_,
         const BaseMinorCPUParams &params,
-        Latch<ForwardInstData>::Output inp_,
+        Latch<ForwardLineData>::Output inp_,
+        Latch<BranchData>::Output branchInp_,
+        Latch<BranchData>::Input predictionOut_,
         Latch<ForwardInstData>::Input out_,
         std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer);
 
@@ -150,9 +237,31 @@ class Decode : public Named
     /** Push input coming from input wire into input buffer */
     void pushIntoInpBuffer();
 
+    /** Check what branches were taken by execute and dumps all
+    * lines that are now old */
+    void dumpIfBranchesExecuted(const BranchData &branch);
+
+    /** Pops all lines that have a Prediction Sequence Number mismatch */
+    void popLinesIfPredictionMismatch(ThreadID tid);
+
     /** Mark each thread as blocked if it cannot reserve any space in
-    * next stage */
+    * next stage, then calls popLinesIfPredictionMismatch(tid)  */
     void updateAllThreadsStatus();
+
+    /** Assign a PC to the line if it's not to discard */
+    void givePcIfValidInstruction(ThreadID tid, bool discard_line,
+                                const ForwardLineData *line_in,
+                                InstDecoder *decoder);
+
+    /** Creates a dynamic instruction that is a fault */
+    MinorDynInstPtr packFault(const ForwardLineData *line_in, ThreadID tid);
+
+    /** Creates a dynamic instruction from static decoded instruction */
+    MinorDynInstPtr packInst(StaticInstPtr decoded_inst, InstId id,
+                                ThreadID tid);
+
+    /** Collect some statistics about the decoded static instruction */
+    void collectStats(StaticInstPtr decoded_inst);                 
 
     /** Set inputindex to the next in order to process next input */
     void advanceInput(ThreadID tid);
@@ -164,8 +273,8 @@ class Decode : public Named
     StaticInstPtr extractMicroInst(ThreadID tid, StaticInstPtr static_inst);
 
     /** Create dynamic instruction from static decoded  micro instruction */
-    MinorDynInstPtr packInst(StaticInstPtr static_micro_inst,
-                InstId id, ThreadID tid);
+    /*MinorDynInstPtr packInst(StaticInstPtr static_micro_inst,
+                InstId id, ThreadID tid);*/
 
     /** Only allows last microop to contain a predicted next address */
     void allowPredictionOnLastMicroop(StaticInstPtr static_micro_inst,
@@ -175,17 +284,25 @@ class Decode : public Named
     MinorDynInstPtr decomposition(ThreadID tid, MinorDynInstPtr inst,
                 unsigned int output_index);
 
-    /** Assign the ExecSeqNum to the instructino */
+    /** Assign the ExecSeqNum to the instruction */
     void assignExecSeqNum(ThreadID tid, MinorDynInstPtr output_inst);
 
     /** Pack instruction into output wire */
     void packIntoOutput(MinorDynInstPtr output_inst,
                 ForwardInstData &insts_out, unsigned int *output_index);
 
+    /** Macroop tracing */
+    void macroopTraceInst(MinorDynInstPtr dyn_inst);
+
+    /** Sets line_in and PC and handles input buffer depending on what
+    * type of instruction it's being processed */
+    void finishLineProcessing(ThreadID tid, const ForwardLineData **line_in,
+                            bool prediction, bool discard_line);
+
     /** If the stage can process more than one input, it gets another line
     * from the input buffer */
-    const ForwardInstData *maybeMoreInput(ThreadID tid,
-                const ForwardInstData *insts_in);
+    const ForwardLineData *maybeMoreInput(ThreadID tid,
+                const ForwardLineData *insts_in);
 
     /** If some instruction has been produced it reserves space for it
     * in the next stage */

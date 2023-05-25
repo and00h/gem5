@@ -1,0 +1,49 @@
+O3PipeView:fetch:78500:0x000100e8:0:1:auipc t0, 1
+O3PipeView:decode:79000
+O3PipeView:rename:79500
+O3PipeView:dispatch:80500
+O3PipeView:issue:80500
+O3PipeView:complete:81000
+O3PipeView:retire:82000:store:0
+O3PipeView:fetch:78500:0x000100ec:0:2:addi t0, t0, 26
+O3PipeView:decode:79000
+O3PipeView:rename:79500
+O3PipeView:dispatch:80500
+O3PipeView:issue:81000
+O3PipeView:complete:81500
+O3PipeView:retire:82500:store:0
+O3PipeView:fetch:78500:0x000100f4:0:4:c_addi t0, 1
+O3PipeView:decode:79000
+O3PipeView:rename:79500
+O3PipeView:dispatch:80500
+O3PipeView:issue:81500
+O3PipeView:complete:82000
+O3PipeView:retire:136000:store:0
+O3PipeView:fetch:78500:0x000100f6:0:5:c_li t2, 2
+O3PipeView:decode:79000
+O3PipeView:rename:79500
+O3PipeView:dispatch:80500
+O3PipeView:issue:80500
+O3PipeView:complete:81000
+O3PipeView:retire:136000:store:0
+O3PipeView:fetch:78500:0x000100f8:0:6:c_li a0, 0
+O3PipeView:decode:79000
+O3PipeView:rename:79500
+O3PipeView:dispatch:80500
+O3PipeView:issue:80500
+O3PipeView:complete:81000
+O3PipeView:retire:136000:store:0
+O3PipeView:fetch:78500:0x000100fa:0:7:addi a7, zero, 93
+O3PipeView:decode:79000
+O3PipeView:rename:79500
+O3PipeView:dispatch:80500
+O3PipeView:issue:80500
+O3PipeView:complete:81000
+O3PipeView:retire:136000:store:0
+O3PipeView:fetch:78500:0x000100f0:0:3:lw t1, 0(t0)
+O3PipeView:decode:79000
+O3PipeView:rename:79500
+O3PipeView:dispatch:80500
+O3PipeView:issue:81500
+O3PipeView:complete:82000
+O3PipeView:retire:136000:store:0
