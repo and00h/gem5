@@ -888,6 +888,35 @@ Decode::isDrained()
     return (*inp.outputWire).isBubble();
 }
 
+Decode::DecodeStats::DecodeStats(MinorCPU *cpu)
+      : statistics::Group(cpu, "decode"),
+      ADD_STAT(intInstructions, statistics::units::Count::get(),
+               "Number of integer instructions successfully decoded"),
+      ADD_STAT(fpInstructions, statistics::units::Count::get(),
+               "Number of floating point instructions successfully decoded"),
+      ADD_STAT(vecInstructions, statistics::units::Count::get(),
+               "Number of SIMD instructions successfully decoded"),
+      ADD_STAT(loadInstructions, statistics::units::Count::get(),
+               "Number of memory load instructions successfully decoded"),
+      ADD_STAT(storeInstructions, statistics::units::Count::get(),
+               "Number of memory store instructions successfully decoded"),
+      ADD_STAT(amoInstructions, statistics::units::Count::get(),
+               "Number of memory atomic instructions successfully decoded")
+{
+        intInstructions
+            .flags(statistics::total);
+        fpInstructions
+            .flags(statistics::total);
+        vecInstructions
+            .flags(statistics::total);
+        loadInstructions
+            .flags(statistics::total);
+        storeInstructions
+            .flags(statistics::total);
+        amoInstructions
+            .flags(statistics::total);
+}
+
 void
 Decode::minorTrace() const
 {
