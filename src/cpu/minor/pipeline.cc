@@ -65,10 +65,10 @@ Pipeline::Pipeline(MinorCPU &cpu_, const BaseMinorCPUParams &params) :
         params.fetch1ToFetch2BackwardDelay, true),
     f2ToD(cpu.name() + ".f2ToD", "insts",
         params.fetch2ToDecodeForwardDelay), */
-    dToF1(cpu.name() + ".DToF1", "prediction",
-        params.fetch1ToFetch2BackwardDelay, true),
     f1ToD(cpu.name() + ".f1ToD", "lines",
         params.fetch1ToFetch2ForwardDelay),
+    dToF1(cpu.name() + ".DToF1", "prediction",
+        params.fetch1ToFetch2BackwardDelay, true),
     dToE(cpu.name() + ".dToE", "insts",
         params.decodeToExecuteForwardDelay),
     eToF1(cpu.name() + ".eToF1", "branch",
