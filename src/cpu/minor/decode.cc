@@ -483,9 +483,9 @@ Decode::decomposition(
     macroInstPending = !static_micro_inst->isLastMicroop();
 
     /* Step input if this is the last micro-op */
-    if (static_micro_inst->isLastMicroop()) {
+    /*if (static_micro_inst->isLastMicroop()) {
         advanceInput(tid);
-    }
+    }*/
     return output_inst;
 }
 
@@ -602,7 +602,9 @@ void
 Decode::evaluate()
 {
     /* Push input onto appropriate input buffer */
-    pushIntoInpBuffer();
+    if (!macroInstPending) {
+        pushIntoInpBuffer();
+    }
 
     ForwardInstData &insts_out = *out.inputWire;
     BranchData prediction;
@@ -794,27 +796,37 @@ Decode::evaluate()
             }
 
             if (dyn_inst || macroInstPending) {
-                /* Step to next sequence number */
-                decode_info.fetchSeqNum++;
+                MinorDynInstPtr curr_inst = NULL;
+                MinorDynInstPtr output_inst = NULL;
+
+                if (macroInstPending) {
+                    curr_inst = macroInstPendingPtr;
+                } else {
+                    curr_inst = dyn_inst;
+
+                    /* Step to next sequence number */
+                    decode_info.fetchSeqNum++;
+                }
 
                 /* Output MinorTrace instruction info for
                 *  pre-microop decomposition macroops */
-                macroopTraceInst(dyn_inst);
+                macroopTraceInst(curr_inst);
 
-                StaticInstPtr static_inst = dyn_inst->staticInst;
-                MinorDynInstPtr output_inst = dyn_inst;
+                StaticInstPtr static_inst = curr_inst->staticInst;
 
 #if TRACING_ON             
-                if (dyn_inst->isFault()) {
-                    dynInstAddTracing(output_inst, NULL, cpu);
+                if (curr_inst->isFault()) {
+                    dynInstAddTracing(curr_inst, NULL, cpu);
                 } else {
-                    dynInstAddTracing(output_inst, static_inst, cpu);
+                    dynInstAddTracing(curr_inst, static_inst, cpu);
                 }
 #endif
 
                 if (static_inst->isMacroop()) {
-                    output_inst = decomposition(tid, dyn_inst, output_index);
-                    macroInstPendingPtr = dyn_inst; 
+                    output_inst = decomposition(tid, curr_inst, output_index);
+                    macroInstPendingPtr = curr_inst; 
+                } else {
+                    output_inst = dyn_inst;
                 }
 
                 assignExecSeqNum(tid, output_inst);
