@@ -122,14 +122,16 @@ class Execute : public Named
     /** Dcache port to pass on to the CPU.  Execute owns this */
     LSQ lsq;
 
+
+  public: 
+  /* Public for Pipeline to be able to pass it to Decode */
+    std::vector<InputBuffer<ForwardInstData>> inputBuffer;
+
     /** Scoreboard of instruction dependencies */
     std::vector<Scoreboard> scoreboard;
 
     /** The execution functional units */
     std::vector<FUPipeline *> funcUnits;
-
-  public: /* Public for Pipeline to be able to pass it to Decode */
-    std::vector<InputBuffer<ForwardInstData>> inputBuffer;
 
   protected:
     /** Stage cycle-by-cycle state */

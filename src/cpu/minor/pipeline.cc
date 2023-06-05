@@ -79,7 +79,7 @@ Pipeline::Pipeline(MinorCPU &cpu_, const BaseMinorCPUParams &params) :
         f2ToD.output(), dToE.input(), execute.inputBuffer),*/
     decode(cpu.name() + ".decode", cpu, params,
         f1ToD.output(), eToF1.output(), dToF1.input(), dToE.input(), 
-        execute.inputBuffer),
+        execute.inputBuffer, execute.scoreboard, execute.funcUnits),
     /*fetch2(cpu.name() + ".fetch2", cpu, params,
         f1ToF2.output(), eToF1.output(), f2ToF1.input(), f2ToD.input(),
         decode.inputBuffer),*/

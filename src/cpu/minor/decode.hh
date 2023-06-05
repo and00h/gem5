@@ -54,6 +54,8 @@
 #include "cpu/minor/pipe_data.hh"
 #include "cpu/pred/bpred_unit.hh"
 #include "params/BaseMinorCPU.hh"
+#include "cpu/minor/scoreboard.hh"
+#include "cpu/minor/func_unit.hh"
 
 namespace gem5
 {
@@ -105,6 +107,20 @@ class Decode : public Named
     /** Pointer to the macroinstruction that needs further 
      * decomposition */
     MinorDynInstPtr macroInstPendingPtr = NULL;
+
+    /** True when there is a microinstruction waiting for a scoreboard
+     *  entry to become available */
+    bool instWaitingDependencies;
+
+    /** Pointer to the inst that is waiting for a scoreboard
+     *  entry to become available */
+    MinorDynInstPtr instWaitingDependenciesPtr;
+
+    /** Scoreboard reference from execute stage */
+    std::vector<Scoreboard>& scoreboard;
+
+    /** Functional units reference from execute stage */
+    std::vector<FUPipeline *>& funcUnits;
 
   public:
     /* Public for Pipeline to be able to pass it to Fetch1 */
@@ -231,7 +247,9 @@ class Decode : public Named
         Latch<BranchData>::Output branchInp_,
         Latch<BranchData>::Input predictionOut_,
         Latch<ForwardInstData>::Input out_,
-        std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer);
+        std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer,
+        std::vector<Scoreboard> &scoreboard_,
+        std::vector<FUPipeline *> &funcUnits_);
 
   protected:
     /** Push input coming from input wire into input buffer */
