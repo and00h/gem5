@@ -75,7 +75,6 @@ Decode::Decode(const std::string &name,
     processMoreThanOneInput(params.decodeCycleInput),
     branchPredictor(*params.branchPred),
     macroInstPending(false), macroInstPendingPtr(NULL),
-    instWaitingDependencies(false), instWaitingDependenciesPtr(NULL),
     scoreboard(scoreboard_),
     funcUnits(funcUnits_),
     decodeInfo(params.numThreads),
@@ -96,6 +95,9 @@ Decode::Decode(const std::string &name,
             InputBuffer<ForwardLineData>(
                 name + ".inputBuffer" + std::to_string(tid), "insts",
                 params.decodeInputBufferSize));
+
+        instWaitingDependencies.push_back(false);
+        instWaitingDependenciesPtr.push_back(nullptr);
     }
 }
 
@@ -726,13 +728,13 @@ Decode::evaluate()
             decode_info.inputIndex < line_in->lineWidth)) || /* More input */
             macroInstPending) && /* Some macroinst not completely processed */
             output_index < outputWidth && /* More output to fill */
-            prediction.isBubble()) || instWaitingDependencies ) /* No predicted branch */
+            prediction.isBubble()) || instWaitingDependencies[tid] ) /* No predicted branch */
         {
             /* The generated instruction.  Leave as NULL if no instruction
             *  is to be packed into the output */
             MinorDynInstPtr dyn_inst = NULL;
 
-            if (!macroInstPending && !instWaitingDependencies) {
+            if (!macroInstPending && !instWaitingDependencies[tid]) {
                 ThreadContext *thread = cpu.getContext(line_in->id.threadId);
                 InstDecoder *decoder = thread->getDecoderPtr();
 
@@ -874,21 +876,21 @@ Decode::evaluate()
 
             }
 
-            if( instWaitingDependencies ) {
+            if( instWaitingDependencies[tid] ) {
 
-                if (checkScoreboardAndUpdate(instWaitingDependenciesPtr, tid)) {
+                if (checkScoreboardAndUpdate(instWaitingDependenciesPtr[tid], tid)) {
                     DPRINTF(Decode, "Can pass to Execute: %s\n", 
-                        *instWaitingDependenciesPtr);
+                        *instWaitingDependenciesPtr[tid]);
 
-                    packIntoOutput(instWaitingDependenciesPtr, 
+                    packIntoOutput(instWaitingDependenciesPtr[tid], 
                         insts_out, &output_index);
-                    instWaitingDependencies = false;
-                    instWaitingDependenciesPtr = NULL;
+                    instWaitingDependencies[tid] = false;
+                    instWaitingDependenciesPtr[tid] = nullptr;
                     /* Continue the execution */
 
                 } else {
                     DPRINTF(Decode, "Cannot pass to Execute: %s\n", 
-                        *instWaitingDependenciesPtr);
+                        *instWaitingDependenciesPtr[tid]);
                     /* Stall here */
 
                 }
@@ -937,8 +939,8 @@ Decode::evaluate()
                         
                 } else {
                     DPRINTF(Decode, "Cannot pass to Execute: %s\n", *output_inst);
-                    instWaitingDependencies = true;
-                    instWaitingDependenciesPtr = output_inst;
+                    instWaitingDependencies[tid] = true;
+                    instWaitingDependenciesPtr[tid] = output_inst;
                     /* Stall here */
                     break;
                 }

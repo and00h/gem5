@@ -110,11 +110,11 @@ class Decode : public Named
 
     /** True when there is a microinstruction waiting for a scoreboard
      *  entry to become available */
-    bool instWaitingDependencies;
+    std::vector<bool> instWaitingDependencies;
 
     /** Pointer to the inst that is waiting for a scoreboard
      *  entry to become available */
-    MinorDynInstPtr instWaitingDependenciesPtr;
+    std::vector<MinorDynInstPtr> instWaitingDependenciesPtr;
 
     /** Scoreboard reference from execute stage */
     std::vector<Scoreboard>& scoreboard;
