@@ -552,9 +552,12 @@ Execute::issueNoCostInst(ThreadID thread_id, MinorDynInstPtr inst)
     cpu.activityRecorder->activity();
 
     /* Mark the destinations for this instruction as
-     *  busy */
-    scoreboard[thread_id].markupInstDests(inst, cpu.curCycle() +
-        Cycles(0), cpu.getContext(thread_id), false);
+     *  busy .
+     * DISABLE AS NOW IT IS DONE IN DECODE STAGE
+
+     */
+    //scoreboard[thread_id].markupInstDests(inst, cpu.curCycle() +
+    //    Cycles(0), cpu.getContext(thread_id), false);
 
     DPRINTF(MinorExecute, "Issuing %s to %d\n", inst->id, noCostFUIndex);
     inst->fuIndex = noCostFUIndex;
@@ -640,13 +643,15 @@ Execute::insertIntoFU(ThreadID thread_id, MinorDynInstPtr inst,
     fu->push(fu_inst);
 
     /* Mark the destinations for this instruction as
-     *  busy */
-    scoreboard[thread_id].markupInstDests(inst, cpu.curCycle() +
-        fu->description.opLat +
-        extra_dest_retire_lat +
-        extra_assumed_lat,
-        cpu.getContext(thread_id),
-        issued_mem_ref && extra_assumed_lat == Cycles(0));
+     *  busy.
+     * DISABLE AS NOW IT IS DONE IN DECODE STAGE
+      */
+    //scoreboard[thread_id].markupInstDests(inst, cpu.curCycle() +
+    //    fu->description.opLat +
+    //    extra_dest_retire_lat +
+    //    extra_assumed_lat,
+    //    cpu.getContext(thread_id),
+    //    issued_mem_ref && extra_assumed_lat == Cycles(0));
 
 
     /* Push the instruction onto the inFlight queue so
@@ -731,25 +736,30 @@ Execute::tryIssueInstruction(ThreadID thread_id,
             } else if (canFUIssueInst(inst, fu, fu_index)) {
                 MinorFUTiming *timing = (!inst->isFault() ?
                     fu->findTiming(inst->staticInst) : NULL);
+                /*
+                 *
+                 * const std::vector<Cycles> *src_latencies =
+                 *  (timing ? &(timing->srcRegsRelativeLats)
+                 *      : NULL);                  
+                 * 
+                 * const std::vector<bool> *cant_forward_from_fu_indices =
+                 *  &(fu->cantForwardFromFUIndices);                 * 
+                 */                
 
-                const std::vector<Cycles> *src_latencies =
-                    (timing ? &(timing->srcRegsRelativeLats)
-                        : NULL);
-
-                const std::vector<bool> *cant_forward_from_fu_indices =
-                    &(fu->cantForwardFromFUIndices);
 
                 if (timing && timing->suppress) {
                     DPRINTF(MinorExecute, "Can't issue inst: %s as extra"
                         " decoding is suppressing it\n",
                         *inst);
-                } else if (!scoreboard[thread_id].canInstIssue(inst,
-                    src_latencies, cant_forward_from_fu_indices,
-                    cpu.curCycle(), cpu.getContext(thread_id)))
-                {
-                    DPRINTF(MinorExecute, "Can't issue inst: %s yet\n",
-                        *inst);
-                } else {
+                /*} else if (!scoreboard[thread_id].canInstIssue(inst,
+                 *   src_latencies, cant_forward_from_fu_indices,
+                 *   cpu.curCycle(), cpu.getContext(thread_id)))
+                 * {
+                 *   DPRINTF(MinorExecute, "Can't issue inst: %s yet\n",
+                 *   *inst);
+                 * DISABLE AS NOW IT IS DONE IN DECODE STAGE
+                 *    
+                */} else {
                     /* Can insert the instruction into this FU */
                     DPRINTF(MinorExecute, "Issuing inst: %s"
                         " into FU %d\n", *inst,

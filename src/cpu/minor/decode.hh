@@ -239,6 +239,15 @@ class Decode : public Named
      *  decode from. */
     ThreadID getScheduledThread();
 
+    /** Check if a specific instruction can be ran from the
+     * next clock cycle. If so, update the scoreboard and return true */
+    bool checkScoreboardAndUpdate(MinorDynInstPtr output_inst, ThreadID tid);
+    
+    /** Find the functional unit that can execute the given instruction.
+     * Returns -1 if no functional unit can execute the instruction. */
+    int findFunctionUnit(MinorDynInstPtr output_inst, 
+      std::vector<FUPipeline *>& funcUnits );
+
   public:
     Decode(const std::string &name,
         MinorCPU &cpu_,

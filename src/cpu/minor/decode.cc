@@ -603,6 +603,80 @@ Decode::pushTailInpBuffer()
 
 }
 
+int
+Decode::findFunctionUnit(MinorDynInstPtr output_inst, std::vector<FUPipeline *>& funcUnits )
+{
+    const unsigned int numFuncUnits = funcUnits.size();
+    for (unsigned int fu_index = 0;fu_index < numFuncUnits; fu_index++)
+    {
+
+        bool fu_is_capable = (!output_inst->isFault() ? funcUnits[fu_index]->provides(output_inst->staticInst->opClass()) : true);
+        if (fu_is_capable && 
+            !funcUnits[fu_index]->stalled && 
+            funcUnits[fu_index]->canInsert() &&
+            !funcUnits[fu_index]->alreadyPushed())
+        {
+            return fu_index;
+        }
+    }
+    return -1;
+}
+
+bool 
+Decode::checkScoreboardAndUpdate(MinorDynInstPtr output_inst, ThreadID tid) 
+{
+    if(output_inst->isNoCostInst()) {
+        scoreboard[tid].markupInstDests(output_inst, cpu.curCycle() +
+            Cycles(0) + Cycles(1), cpu.getContext(tid), false);
+
+        return true;
+    }
+
+    /* Find FU that can execute this instruction */
+    int fu_index = findFunctionUnit(output_inst, funcUnits);
+    if(fu_index == -1) return false;
+    
+    FUPipeline *fu = funcUnits[fu_index];
+    MinorFUTiming *timing = (!output_inst->isFault() ?
+        fu->findTiming(output_inst->staticInst) : NULL);
+    const std::vector<Cycles> *src_latencies =
+        (timing ? &(timing->srcRegsRelativeLats)
+            : NULL);
+    const std::vector<bool> *cant_forward_from_fu_indices =
+        &(fu->cantForwardFromFUIndices);
+
+
+    if(!scoreboard[tid].canInstIssue(output_inst,
+        src_latencies, cant_forward_from_fu_indices,
+        cpu.curCycle()+ Cycles(1), cpu.getContext(tid)))
+    {
+        return false;
+
+    }
+
+    bool issued_mem_ref = output_inst->isMemRef();
+    Cycles extra_dest_retire_lat = Cycles(0);
+    Cycles extra_assumed_lat = Cycles(0);
+
+    if (timing)
+    {
+        extra_dest_retire_lat =
+            timing->extraCommitLat;
+        extra_assumed_lat =
+            timing->extraAssumedLat;
+    }
+
+
+    scoreboard[tid].markupInstDests(output_inst, cpu.curCycle() +
+        Cycles(1) + 
+        fu->description.opLat +
+        extra_dest_retire_lat +
+        extra_assumed_lat,
+        cpu.getContext(tid),
+        issued_mem_ref && extra_assumed_lat == Cycles(0));
+    return true;
+}
+
 void
 Decode::evaluate()
 {
@@ -647,18 +721,18 @@ Decode::evaluate()
         /* Pack instructions into the output while we can.  This may involve
             * using more than one input line.  Note that lineWidth will be 0
             * for faulting lines */
-        while (((line_in &&
+        while ((((line_in &&
             (line_in->isFault() ||
             decode_info.inputIndex < line_in->lineWidth)) || /* More input */
             macroInstPending) && /* Some macroinst not completely processed */
             output_index < outputWidth && /* More output to fill */
-            prediction.isBubble() ) /* No predicted branch */
+            prediction.isBubble()) || instWaitingDependencies ) /* No predicted branch */
         {
             /* The generated instruction.  Leave as NULL if no instruction
             *  is to be packed into the output */
             MinorDynInstPtr dyn_inst = NULL;
 
-            if (!macroInstPending) {
+            if (!macroInstPending && !instWaitingDependencies) {
                 ThreadContext *thread = cpu.getContext(line_in->id.threadId);
                 InstDecoder *decoder = thread->getDecoderPtr();
 
@@ -800,7 +874,27 @@ Decode::evaluate()
 
             }
 
-            if (dyn_inst || macroInstPending) {
+            if( instWaitingDependencies ) {
+
+                if (checkScoreboardAndUpdate(instWaitingDependenciesPtr, tid)) {
+                    DPRINTF(Decode, "Can pass to Execute: %s\n", 
+                        *instWaitingDependenciesPtr);
+
+                    packIntoOutput(instWaitingDependenciesPtr, 
+                        insts_out, &output_index);
+                    instWaitingDependencies = false;
+                    instWaitingDependenciesPtr = NULL;
+                    /* Continue the execution */
+
+                } else {
+                    DPRINTF(Decode, "Cannot pass to Execute: %s\n", 
+                        *instWaitingDependenciesPtr);
+                    /* Stall here */
+
+                }
+                break;
+            }
+            else if (dyn_inst || macroInstPending) {
                 MinorDynInstPtr curr_inst = NULL;
                 MinorDynInstPtr output_inst = NULL;
 
@@ -835,7 +929,19 @@ Decode::evaluate()
                 }
 
                 assignExecSeqNum(tid, output_inst);
-                packIntoOutput(output_inst, insts_out, &output_index);
+
+                if (checkScoreboardAndUpdate(output_inst, tid)) {
+                    DPRINTF(Decode, "Can pass to Execute: %s\n", *output_inst);
+                    packIntoOutput(output_inst, insts_out, &output_index);
+                    /* Continue the execution normally */
+                        
+                } else {
+                    DPRINTF(Decode, "Cannot pass to Execute: %s\n", *output_inst);
+                    instWaitingDependencies = true;
+                    instWaitingDependenciesPtr = output_inst;
+                    /* Stall here */
+                    break;
+                }
             }
 
             
