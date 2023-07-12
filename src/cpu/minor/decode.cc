@@ -46,6 +46,7 @@
 #include "debug/Branch.hh"
 #include "debug/Decode.hh"
 #include "debug/MinorTrace.hh"
+#include "debug/MinorGUI.hh"
 
 namespace gem5
 {
@@ -691,6 +692,9 @@ Decode::evaluate()
     BranchData prediction;
     BranchData &branch_inp = *branchInp.outputWire;
 
+    bool is_stalling = false;
+    MinorDynInstPtr inst_ptr_4_GUI = NULL;
+
     assert(insts_out.isBubble());
 
     /* React to branches from Execute to update local branch prediction
@@ -863,6 +867,7 @@ Decode::evaluate()
                         line_in->lineBaseAddr,
                         line_in->lineWidth);
                     }
+                
                 }
 
             /* Remember the streamSeqNum of this line so we can tell when
@@ -873,6 +878,9 @@ Decode::evaluate()
                                 !prediction.isBubble(), discard_line);
 
             line_in = maybeMoreInput(tid, line_in);
+
+            /* Info for GUI */
+            is_stalling = dyn_inst ? false : true;
 
             }
 
@@ -887,11 +895,14 @@ Decode::evaluate()
                     instWaitingDependencies[tid] = false;
                     instWaitingDependenciesPtr[tid] = nullptr;
                     /* Continue the execution */
+                    is_stalling = false;
+                    inst_ptr_4_GUI = instWaitingDependenciesPtr[tid];
 
                 } else {
                     DPRINTF(Decode, "Cannot pass to Execute: %s\n", 
                         *instWaitingDependenciesPtr[tid]);
                     /* Stall here */
+                    is_stalling = true;
 
                 }
                 break;
@@ -936,17 +947,19 @@ Decode::evaluate()
                     DPRINTF(Decode, "Can pass to Execute: %s\n", *output_inst);
                     packIntoOutput(output_inst, insts_out, &output_index);
                     /* Continue the execution normally */
+                    is_stalling = false;
+                    inst_ptr_4_GUI = output_inst;
                         
                 } else {
                     DPRINTF(Decode, "Cannot pass to Execute: %s\n", *output_inst);
                     instWaitingDependencies[tid] = true;
                     instWaitingDependenciesPtr[tid] = output_inst;
                     /* Stall here */
+                    is_stalling = true;
                     break;
                 }
             }
 
-            
         }
 
         /* The rest of the output (if any) should already have been packed
@@ -970,6 +983,12 @@ Decode::evaluate()
         pushTailInpBuffer();
     }
 
+    /* Format >>> RISCV: decode: tick: stall_bit: inst_address: assembly */
+    DPRINTF(MinorGUI, "Log4GUI: decode: %d: %d: %x: %s\n", 
+        curTick(),
+        is_stalling,
+        inst_ptr_4_GUI ? inst_ptr_4_GUI->pc->instAddr() : 0x0,
+        inst_ptr_4_GUI ? inst_ptr_4_GUI->staticInst->disassemble(inst_ptr_4_GUI->pc->instAddr()) : "");
 }
 
 inline ThreadID

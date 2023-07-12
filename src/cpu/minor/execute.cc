@@ -53,6 +53,7 @@
 #include "debug/MinorMem.hh"
 #include "debug/MinorTrace.hh"
 #include "debug/PCEvent.hh"
+#include "debug/MinorGUI.hh"
 
 namespace gem5
 {
@@ -731,6 +732,15 @@ Execute::tryIssueInstruction(ThreadID thread_id,
                 QueuedInst fu_inst(inst);
                 thread.inFlightInsts->push(fu_inst);
 
+                /* FORMAT >>> Log4GUI: stage: tick: stall_bit: inst_address:
+                    ...assembly: fu_index*/
+                DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n", 
+                    curTick(),
+                    0, /* not stalling */
+                    inst->pc->instAddr(),
+                    inst->staticInst->disassemble(inst->pc->instAddr()),
+                    -1);
+
                 issued = true;
 
             } else if (canFUIssueInst(inst, fu, fu_index)) {
@@ -771,11 +781,32 @@ Execute::tryIssueInstruction(ThreadID thread_id,
                      *  this instruction to get to the end of its FU */
                     cpu.activityRecorder->activity();
 
+                    /* FORMAT >>> Log4GUI: stage: tick: stall_bit: inst_address:
+                        ...assembly: fu_index*/
+                    DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n", 
+                    curTick(),
+                    0, /* not stalling */
+                    inst->pc->instAddr(),
+                    inst->staticInst->disassemble(inst->pc->instAddr()),
+                    fu_index);
+
                     issued = true;
                 }
             }
         }
     }
+
+    if (!issued) {
+        /* FORMAT >>> Log4GUI: stage: tick: stall_bit: inst_address:
+            ...assembly: fu_index*/
+        DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n", 
+        curTick(),
+        1, /* is stalling */
+        0x0,
+        "",
+        -1);
+    }
+
     return issued;
 }
 

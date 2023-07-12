@@ -68,6 +68,8 @@ if not env['CONF']['USE_NULL_ISA']:
     DebugFlag('MinorTrace', 'MinorTrace cycle-by-cycle state trace')
     DebugFlag('MinorTiming', 'Extra timing for instructions')
 
+    DebugFlag('MinorGUI')
+
     CompoundFlag('Minor', [
         'MinorCPU', 'MinorExecute', 'MinorInterrupt', 'MinorMem',
         'MinorScoreboard'])

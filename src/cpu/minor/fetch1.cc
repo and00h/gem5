@@ -50,6 +50,7 @@
 #include "debug/Drain.hh"
 #include "debug/Fetch.hh"
 #include "debug/MinorTrace.hh"
+#include "debug/MinorGUI.hh"
 
 namespace gem5
 {
@@ -206,6 +207,7 @@ Fetch1::fetchLine(ThreadID tid)
      * Note that as instructions can span lines, this PC is only a
      * reliable 'new' PC if the next line has a new stream sequence number. */
     thread.fetchAddr = aligned_pc + request_size;
+
 }
 
 std::ostream &
@@ -656,12 +658,15 @@ Fetch1::fetchFromScheduledThread()
     } else {
         DPRINTF(Fetch, "No active threads available to fetch from\n");
     }
+
 }
 
-void
+bool
 Fetch1::processCompletedFetchRequests(Fetch1::FetchRequestPtr response,
     ForwardLineData &line_out)
 {
+    bool res = false;
+
     if (response->isDiscardable()) {
         nextStageReserve[response->id.threadId].freeReservation();
         DPRINTF(Fetch, "Discarding translated fetch as it's for"
@@ -673,7 +678,10 @@ Fetch1::processCompletedFetchRequests(Fetch1::FetchRequestPtr response,
         DPRINTF(Fetch, "Processing fetched line: %s\n",
             response->id);
         processResponse(response, line_out);
+        res = true;
     }
+
+    return res;
 }
 
 void
@@ -682,6 +690,9 @@ Fetch1::evaluate()
     const BranchData &execute_branch = *inp.outputWire;
     const BranchData &fetch2_branch = *prediction.outputWire;
     ForwardLineData &line_out = *out.inputWire;
+
+    bool is_stalling = false;
+    bool has_output = false;
 
     assert(line_out.isBubble());
 
@@ -706,14 +717,24 @@ Fetch1::evaluate()
     if (!transfers.empty() &&
         transfers.front()->isComplete())
     {
-        processCompletedFetchRequests(transfers.front(), line_out);
+        DPRINTF(MinorGUI, "Before %d\n", line_out.isBubble());
+        has_output = processCompletedFetchRequests(transfers.front(), line_out);
+        DPRINTF(MinorGUI, "After %d\n", line_out.isBubble());
         popAndDiscard(transfers);
+
+        //has_output = true;
     }
 
     /* If we generated output, and mark the stage as being active
      *  to encourage that output on to the next stage */
-    if (!line_out.isBubble())
+    if (!line_out.isBubble()) {
         cpu.activityRecorder->activity();
+        //has_output = true;
+    } else {
+        is_stalling = true;
+    }
+
+    //DPRINTF(MinorGUI, "!!! bubble? %d\n", line_out.isBubble());
 
     /* Fetch1 has no inputBuffer so the only activity we can have is to
      *  generate a line output (tested just above) or to initiate a memory
@@ -730,6 +751,15 @@ Fetch1::evaluate()
     for (auto& thread : fetchInfo) {
         thread.wakeupGuard = false;
     }
+
+    /* Format >>> RISCV:decode:tick:stall:address:assembly
+        - stall: 0 if not stalling, 1 if stalling */
+    DPRINTF(MinorGUI, "Log4GUI: %d: %x: ?\n", 
+        //curTick(),
+        is_stalling,
+        has_output ? line_out.pc->instAddr() : 0x0
+        //inst_ptr_4_GUI ? inst_ptr_4_GUI->request->disassemble(inst_ptr_4_GUI->pc->instAddr()) : ""
+        );
 }
 
 void

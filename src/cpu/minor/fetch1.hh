@@ -332,7 +332,7 @@ class Fetch1 : public Named
 
     /** Delete no more needed fetch request or handle
      * completed fetch */
-    void processCompletedFetchRequests(Fetch1::FetchRequestPtr response,
+    bool processCompletedFetchRequests(Fetch1::FetchRequestPtr response,
       ForwardLineData &line_out);
 
     /** Start fetching from a new address. */
