@@ -717,24 +717,18 @@ Fetch1::evaluate()
     if (!transfers.empty() &&
         transfers.front()->isComplete())
     {
-        DPRINTF(MinorGUI, "Before %d\n", line_out.isBubble());
         has_output = processCompletedFetchRequests(transfers.front(), line_out);
-        DPRINTF(MinorGUI, "After %d\n", line_out.isBubble());
         popAndDiscard(transfers);
-
-        //has_output = true;
     }
 
     /* If we generated output, and mark the stage as being active
      *  to encourage that output on to the next stage */
     if (!line_out.isBubble()) {
         cpu.activityRecorder->activity();
-        //has_output = true;
     } else {
         is_stalling = true;
     }
 
-    //DPRINTF(MinorGUI, "!!! bubble? %d\n", line_out.isBubble());
 
     /* Fetch1 has no inputBuffer so the only activity we can have is to
      *  generate a line output (tested just above) or to initiate a memory
@@ -752,14 +746,11 @@ Fetch1::evaluate()
         thread.wakeupGuard = false;
     }
 
-    /* Format >>> RISCV:decode:tick:stall:address:assembly
-        - stall: 0 if not stalling, 1 if stalling */
-    DPRINTF(MinorGUI, "Log4GUI: %d: %x: ?\n", 
-        //curTick(),
+    /* Format >>> Log4GUI: fetch1: tick: stall_bit: inst_address: <assembly> */
+    DPRINTF(MinorGUI, "Log4GUI: fetch1: %d: %d: %x: <assembly>\n", 
+        curTick(),
         is_stalling,
-        has_output ? line_out.pc->instAddr() : 0x0
-        //inst_ptr_4_GUI ? inst_ptr_4_GUI->request->disassemble(inst_ptr_4_GUI->pc->instAddr()) : ""
-        );
+        has_output ? line_out.pc->instAddr() : 0x0);
 }
 
 void

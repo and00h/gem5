@@ -983,7 +983,7 @@ Decode::evaluate()
         pushTailInpBuffer();
     }
 
-    /* Format >>> RISCV: decode: tick: stall_bit: inst_address: assembly */
+    /* Format >>> Log4GUI: decode: tick: stall_bit: inst_address: assembly */
     DPRINTF(MinorGUI, "Log4GUI: decode: %d: %d: %x: %s\n", 
         curTick(),
         is_stalling,
