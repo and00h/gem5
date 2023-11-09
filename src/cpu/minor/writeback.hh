@@ -42,8 +42,8 @@
  *  instruction stream info. to Fetch1.
  */
 
-#ifndef __CPU_MINOR_EXECUTE_HH__
-#define __CPU_MINOR_EXECUTE_HH__
+#ifndef __CPU_MINOR_WRITEBACK_HH__
+#define __CPU_MINOR_WRITEBACK_HH__
 
 #include <vector>
 
@@ -65,26 +65,18 @@ namespace minor
 
 /** Execute stage.  Everything apart from fetching and decoding instructions.
  *  The LSQ lives here too. */
-class Execute : public Named
+class Writeback : public Named
 {
   protected:
-
-    /** Input port carrying instructions from Decode */
-    Latch<ForwardInstData>::Output inp;
 
     /** Input port carrying stream changes to Fetch1 */
     Latch<BranchData>::Input out;
 
-    Latch<ForwardInstData>::Input insts_out;
+    /** Output port carrying instructions from Execute */
+    Latch<ForwardInstData>::Output inp;
 
     /** Pointer back to the containing CPU */
     MinorCPU &cpu;
-
-    /** Number of instructions that can be issued per cycle */
-    unsigned int issueLimit;
-
-    /** Number of memory ops that can be issued per cycle */
-    unsigned int memoryIssueLimit;
 
     /** Number of instructions that can be committed per cycle */
     unsigned int commitLimit;
@@ -92,53 +84,17 @@ class Execute : public Named
     /** Number of memory instructions that can be committed per cycle */
     unsigned int memoryCommitLimit;
 
-    std::vector<InputBuffer<ForwardInstData>> &nextStageReserve;
-
-    /** Width of output of this stage/input of next in instructions */
-    unsigned int outputWidth;
-
     /** If true, more than one input line can be processed each cycle if
      *  there is room to execute more instructions than taken from the first
      *  line */
     bool processMoreThanOneInput;
 
-    /** Descriptions of the functional units we want to generate */
-    MinorFUPool &fuDescriptions;
-
-    /** Number of functional units to produce */
-    unsigned int numFuncUnits;
-
-    /** Longest latency of any FU, useful for setting up the activity
-     *  recoder */
-    Cycles longestFuLatency;
-
     /** Modify instruction trace times on commit */
     bool setTraceTimeOnCommit;
-
-    /** Modify instruction trace times on issue */
-    bool setTraceTimeOnIssue;
-
-    /** Allow mem refs to leave their FUs before reaching the head
-     *  of the in flight insts queue if their dependencies are met */
-    bool allowEarlyMemIssue;
-
-    /** The FU index of the non-existent costless FU for instructions
-     *  which pass the MinorDynInst::isNoCostInst test */
-    unsigned int noCostFUIndex;
-
-    /** Dcache port to pass on to the CPU.  Execute owns this */
-    //LSQ& lsq;
-
 
   public: 
   /* Public for Pipeline to be able to pass it to Decode */
     std::vector<InputBuffer<ForwardInstData>> inputBuffer;
-
-    /** Scoreboard of instruction dependencies */
-    std::vector<Scoreboard> scoreboard;
-
-    /** The execution functional units */
-    std::vector<FUPipeline *> funcUnits;
 
   protected:
     /** Stage cycle-by-cycle state */
@@ -159,10 +115,10 @@ class Execute : public Named
         DrainAllInsts /* Discarding all remaining insts */
     };
 
-    struct ExecuteThreadInfo
+    struct WritebackThreadInfo
     {
         /** Constructor */
-        ExecuteThreadInfo(unsigned int insts_committed) :
+        WritebackThreadInfo(unsigned int insts_committed) :
             inputIndex(0),
             lastCommitWasEndOfMacroop(true),
             instsBeingCommitted(insts_committed),
@@ -171,7 +127,7 @@ class Execute : public Named
             drainState(NotDraining)
         { }
 
-        ExecuteThreadInfo(const ExecuteThreadInfo& other) :
+        WritebackThreadInfo(const WritebackThreadInfo& other) :
             inputIndex(other.inputIndex),
             lastCommitWasEndOfMacroop(other.lastCommitWasEndOfMacroop),
             instsBeingCommitted(other.instsBeingCommitted),
@@ -179,12 +135,6 @@ class Execute : public Named
             lastPredictionSeqNum(other.lastPredictionSeqNum),
             drainState(other.drainState)
         { }
-
-        /** In-order instructions either in FUs or the LSQ */
-        Queue<QueuedInst, ReportTraitsAdaptor<QueuedInst> > *inFlightInsts;
-
-        /** Memory ref instructions still in the FUs */
-        Queue<QueuedInst, ReportTraitsAdaptor<QueuedInst> > *inFUMemInsts;
 
         /** Index that we've completed upto in getInput data.  We can say we're
          *  popInput when this equals getInput()->width() */
@@ -214,10 +164,9 @@ class Execute : public Named
         DrainState drainState;
     };
 
-    std::vector<ExecuteThreadInfo> executeInfo;
+    std::vector<WritebackThreadInfo> writebackInfo;
 
     ThreadID interruptPriority;
-    ThreadID issuePriority;
     ThreadID commitPriority;
 
   protected:
@@ -240,29 +189,6 @@ class Execute : public Named
     void updateBranchData(ThreadID tid, BranchData::Reason reason,
         MinorDynInstPtr inst, const PCStateBase &target, BranchData &branch);
 
-    /** Handle extracting mem ref responses from the memory queues and
-     *  completing the associated instructions.
-     *  Fault is an output and will contain any fault caused (and already
-     *  invoked by the function)
-     *  Sets branch to any branch generated by the instruction. */
-    void handleMemResponse(MinorDynInstPtr inst,
-        LSQ::LSQRequestPtr response, BranchData &branch,
-        Fault &fault);
-
-    /** Execute a memory reference instruction.  This calls initiateAcc on
-     *  the instruction which will then call writeMem or readMem to issue a
-     *  memory access to the LSQ.
-     *  Returns true if the instruction was executed rather than stalled
-     *  because of a lack of LSQ resources and false otherwise.
-     *  branch is set to any branch raised by the instruction.
-     *  failed_predicate is set to false if the instruction passed its
-     *  predicate and so will access memory or true if the instruction
-     *  *failed* its predicate and is now complete.
-     *  fault is set if any non-NoFault fault is raised.
-     *  Any faults raised are actually invoke-d by this function. */
-    bool executeMemRefInst(MinorDynInstPtr inst, BranchData &branch,
-        bool &failed_predicate, Fault &fault);
-
     /** Has an interrupt been raised */
     bool isInterrupted(ThreadID thread_id) const;
 
@@ -272,33 +198,6 @@ class Execute : public Named
     /** Act on an interrupt.  Returns true if an interrupt was actually
      *  signalled and invoked */
     bool takeInterrupt(ThreadID thread_id, BranchData &branch);
-
-    /** Issues a non-cost instruction to the specified thread's
-     * noCost functional unit */
-    void issueNoCostInst(ThreadID thread_id, MinorDynInstPtr inst);
-
-    /** Inserts an instruction into a functional unit pipeline for
-      * execution, and marks its destinations as busy in the scoreboard.*/
-    void insertIntoFU(ThreadID thread_id, MinorDynInstPtr inst,
-        MinorFUTiming *timing, int fu_index);
-
-    /** Determines if an instruction can be issued to a given functional
-     *  unit pipeline. Returns true if the functional unit is capable of
-     *  executing the instruction's operation class, is not currently
-     *  busy, not stalled, and can insert the instruction without
-     *  delaying other queued instructions. Returns false otherwise. */
-    bool canFUIssueInst(MinorDynInstPtr inst, FUPipeline* fu, int fu_index);
-
-    /** Attempts to issue an instruction to a functional unit pipeline.
-     * Returns true if the instruction is issued correctly. Returns false
-     * otherwise */
-    bool tryIssueInstruction(ThreadID thread_id, const MinorDynInstPtr &inst,
-        unsigned int &fu_index, bool &discarded, bool &issued_mem_ref);
-
-
-
-    /** Try and issue instructions from the inputBuffer */
-    unsigned int issue(ThreadID thread_id);
 
     /** Try to act on PC-related events.  Returns true if any were
      *  executed */
@@ -331,9 +230,9 @@ class Execute : public Named
      *          (and so needs to be traced and accounted for)
      *      completed_mem_issue is set if the instruction was a
      *          memory access that was issued */
-    bool commitInst(MinorDynInstPtr inst, bool early_memory_issue,
-        BranchData &branch, Fault &fault, bool &committed,
-        bool &completed_mem_issue);
+    bool commitInst(MinorDynInstPtr inst,
+        BranchData &branch, Fault &fault, bool &committed
+        );
 
     /** Try and commit instructions from the ends of the functional unit
      *  pipelines.
@@ -345,51 +244,22 @@ class Execute : public Named
     void commit(ThreadID thread_id, bool only_commit_microops, bool discard,
         BranchData &branch);
 
-    void sendOutput(ThreadID thread_id, bool only_commit_microops, bool discard,
-        BranchData &branch);
-
-    void packIntoOutput(
-    MinorDynInstPtr output_inst,
-    ForwardInstData &insts_out,
-    unsigned int *output_index)
-{
-    /* Correctly size the output before writing */
-    if (*output_index == 0) {
-        insts_out.resize(outputWidth);
-    }
-
-    /* Push into output */
-    insts_out.insts[*output_index] = output_inst;
-
-    (*output_index) += 1;
-}
-
     /** Set the drain state (with useful debugging messages) */
     void setDrainState(ThreadID thread_id, DrainState state);
 
     /** Use the current threading policy to determine the next thread to
      *  decode from. */
     ThreadID getCommittingThread();
-    ThreadID getIssuingThread();
-
   public:
-    Execute(const std::string &name_,
+    Writeback(const std::string &name_,
         MinorCPU &cpu_,
         const BaseMinorCPUParams &params,
         Latch<ForwardInstData>::Output inp_,
-        Latch<BranchData>::Input out_,
-        std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer,
-        Latch<ForwardInstData>::Input insts_out_);
+        Latch<BranchData>::Input out_);
 
-    ~Execute();
+    ~Writeback();
 
   public:
-
-    /** Returns the DcachePort owned by this Execute to pass upwards */
-    MinorCPU::MinorCPUPort &getDcachePort();
-
-    /** To allow ExecContext to find the LSQ */
-    LSQ &getLSQ() { return cpu.getLSQ(); }
 
     /** Does the given instruction have the right stream sequence number
      *  to be committed? */
@@ -411,34 +281,8 @@ class Execute : public Named
     /** Like the drain interface on SimObject */
     unsigned int drain();
     void drainResume();
-
-    std::vector<Scoreboard>& getScoreboard() { return scoreboard; }
   /** Refactor methods */
   private:
-   // Execute::commit()
-   /** Tries to commit memory responses (or discard them) */
-    void tryToHandleMemResponses(ExecuteThreadInfo &ex_info, bool discard_inst,
-      bool &committed_inst,
-      bool &completed_mem_ref,
-      bool &completed_inst,
-      MinorDynInstPtr inst,
-      LSQ::LSQRequestPtr mem_response,
-      BranchData &branch,
-      Fault &fault);
-
-    /** Checks if an early memory issue is possible. If it is, sets completed_inst to true
-     * and sets inst to the instruction corresponding to the memory issue, so that it may be
-     * later committed.
-     */
-    void checkIfEarlyMemIssuePossible(ExecuteThreadInfo &ex_info, MinorDynInstPtr* inst, bool &try_to_commit, bool &early_memory_issue, bool &completed_inst, InstSeqNum head_exec_seq_num);
-
-    /** Check if the instruction has reached the end of a FU and can be committed.
-     * If it is, set try_to_commit and completed_inst to true
-     */
-    void checkIfCommitFromFUsPossible(const MinorDynInstPtr inst, bool &completed_inst, bool &try_to_commit, InstSeqNum head_exec_seq_num);
-    /** Check if the instruction needs further delay to commit. */
-    void checkExtraCommitDelay(ThreadID thread_id, MinorDynInstPtr const inst);
-
     /** Actually try to commit the instruction. Commit fails if there are incomplete memory barriers
      * there is extra commit delay to account for (see checkExtraCommitDelay) or commitInst returns false.
      * If the instruction has been completed, unstall its functional unit.
@@ -454,23 +298,23 @@ class Execute : public Named
     );
 
     /** Update commit statistics */
-    void doCommitAccounting(MinorDynInstPtr const inst, ExecuteThreadInfo &ex_info, unsigned int &num_insts_committed, unsigned int &num_mem_refs_committed, bool completed_mem_ref);
+    void doCommitAccounting(MinorDynInstPtr const inst, WritebackThreadInfo &ex_info, unsigned int &num_insts_committed, unsigned int &num_mem_refs_committed, bool completed_mem_ref);
     /** Final commit operations. Pop the instruction from the queue of instructions in memory FUs (if it was a memory instruction),
      * pop the instruction from the queue of in-flight instructions (if it wasn't a memory instruction), complete the memory
      * barrier (if it was a memory barrier instruction) and update the scoreboard.
     */
-    void finalizeCompletedInstruction(ThreadID thread_id, const MinorDynInstPtr inst, ExecuteThreadInfo &ex_info, const Fault &fault, bool issued_mem_ref, bool committed_inst);
+    void finalizeCompletedInstruction(ThreadID thread_id, const MinorDynInstPtr inst, WritebackThreadInfo &ex_info, const Fault &fault, bool committed_inst);
 
-    // Execute::commitInst()
-    /** Calculate the effective address and issue the access to memory */
-    void startMemRefExecution(MinorDynInstPtr inst, BranchData &branch, Fault &fault, gem5::ThreadContext *thread, bool early_memory_issue, bool &completed_inst, bool &completed_mem_issue);
     /** Perform the actual execution of the instruction. If a fault happened, invoke it. */
     void actuallyExecuteInst(ThreadID thread_id, MinorDynInstPtr inst, Fault &fault, gem5::ThreadContext *thread, bool &committed);
     /** Check if the thread has been suspended. */
     void checkSuspension(ThreadID thread_id, MinorDynInstPtr inst, gem5::ThreadContext *thread, BranchData &branch);
+
+    void commit_old(ThreadID thread_id, bool only_commit_microops, bool discard, BranchData &branch);
+
 };
 
 } // namespace minor
 } // namespace gem5
 
-#endif /* __CPU_MINOR_EXECUTE_HH__ */
+#endif /* __CPU_MINOR_WRITEBACK_HH__ */

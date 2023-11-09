@@ -180,7 +180,7 @@ class MinorDynInst : public RefCounted
 
     /** This is actually a fault masquerading as an instruction */
     Fault fault;
-
+    bool committed = false;
     /** Tried to predict the destination of this inst (if a control
      *  instruction or a sys call) */
     bool triedToPredict = false;

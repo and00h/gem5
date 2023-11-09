@@ -47,10 +47,12 @@
 
 #include "cpu/minor/activity.hh"
 #include "cpu/minor/cpu.hh"
+#include "cpu/minor/writeback.hh"
 #include "cpu/minor/decode.hh"
 #include "cpu/minor/execute.hh"
 #include "cpu/minor/fetch1.hh"
 #include "cpu/minor/fetch2.hh"
+#include "cpu/minor/scoreboard.hh"
 #include "params/BaseMinorCPU.hh"
 #include "sim/ticked_object.hh"
 
@@ -86,10 +88,15 @@ class Pipeline : public Ticked
     Latch<ForwardInstData> dToE;
     Latch<BranchData> eToF1;
 
+    Latch<ForwardInstData> eToW;
+
+    Writeback writeback;
     Execute execute;
     Decode decode;
     //Fetch2 fetch2;
     Fetch1 fetch1;
+
+    LSQ lsq;
 
     /** Activity recording for the pipeline.  This is access through the CPU
      *  by the pipeline stages but belongs to the Pipeline as it is the
@@ -103,7 +110,7 @@ class Pipeline : public Ticked
         /* A stage representing wakeup of the whole processor */
         CPUStageId = 0,
         /* Real pipeline stages */
-        Fetch1StageId, Fetch2StageId, DecodeStageId, ExecuteStageId,
+        Fetch1StageId, Fetch2StageId, DecodeStageId, ExecuteStageId, WritebackStageId,
         Num_StageId /* Stage count */
     };
 
@@ -142,6 +149,13 @@ class Pipeline : public Ticked
 
     /** To give the activity recorder to the CPU */
     MinorActivityRecorder *getActivityRecorder() { return &activityRecorder; }
+
+    bool instIsRightStream(MinorDynInstPtr inst) { return execute.instIsRightStream(inst); }
+    bool instIsHeadInst(MinorDynInstPtr inst) { return execute.instIsHeadInst(inst); }
+
+    LSQ& getLSQ() { return lsq; }
+
+    std::vector<Scoreboard>& getScoreboard();
 };
 
 } // namespace minor

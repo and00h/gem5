@@ -63,6 +63,8 @@ namespace minor
 /** Forward declared to break the cyclic inclusion dependencies between
  *  pipeline and cpu */
 class Pipeline;
+class LSQ;
+class Scoreboard;
 
 /** Minor will use the SimpleThread state for now */
 typedef SimpleThread MinorThread;
@@ -204,6 +206,9 @@ class MinorCPU : public BaseCPU
      *  enumeration Pipeline::StageId */
     void wakeupOnEvent(unsigned int stage_id);
     EventFunctionWrapper *fetchEventWrapper;
+
+    minor::LSQ& getLSQ();
+    std::vector<minor::Scoreboard>& getScoreboard();
 };
 
 } // namespace gem5
