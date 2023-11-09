@@ -63,14 +63,15 @@ namespace minor
 {
 
 /* Forward declaration */
-class Execute;
+class Pipeline;
 
 class LSQ : public Named
 {
   protected:
     /** My owner(s) */
     MinorCPU &cpu;
-    Execute &execute;
+    Pipeline &pipeline;
+    //Execute &execute;
 
   protected:
     /** State of memory access for head access. */
@@ -647,7 +648,7 @@ class LSQ : public Named
 
   public:
     LSQ(std::string name_, std::string dcache_port_name_,
-        MinorCPU &cpu_, Execute &execute_,
+        MinorCPU &cpu_, Pipeline &pipeline_,
         unsigned int max_accesses_in_memory_system, unsigned int line_width,
         unsigned int requests_queue_size, unsigned int transfers_queue_size,
         unsigned int store_buffer_size,

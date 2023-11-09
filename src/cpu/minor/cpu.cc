@@ -43,6 +43,7 @@
 #include "debug/Drain.hh"
 #include "debug/MinorCPU.hh"
 #include "debug/Quiesce.hh"
+#include "cpu/minor/lsq.hh"
 
 namespace gem5
 {
@@ -92,6 +93,14 @@ MinorCPU::~MinorCPU()
     for (ThreadID thread_id = 0; thread_id < threads.size(); thread_id++) {
         delete threads[thread_id];
     }
+}
+
+minor::LSQ& MinorCPU::getLSQ() {
+    return pipeline->getLSQ();
+}
+
+std::vector<minor::Scoreboard>& MinorCPU::getScoreboard() { 
+    return pipeline->getScoreboard(); 
 }
 
 void

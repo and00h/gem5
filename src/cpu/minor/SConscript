@@ -59,9 +59,11 @@ if not env['CONF']['USE_NULL_ISA']:
     Source('pipeline.cc')
     Source('scoreboard.cc')
     Source('stats.cc')
+    Source('writeback.cc')
 
     DebugFlag('MinorCPU', 'Minor CPU-level events')
     DebugFlag('MinorExecute', 'Minor Execute stage')
+    DebugFlag('MinorWriteback', 'Minor Writeback stage')
     DebugFlag('MinorInterrupt', 'Minor interrupt handling')
     DebugFlag('MinorMem', 'Minor memory accesses')
     DebugFlag('MinorScoreboard', 'Minor Execute register scoreboard')

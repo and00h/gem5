@@ -64,7 +64,7 @@ namespace minor
 {
 
 /* Forward declaration of Execute */
-class Execute;
+class Writeback;
 
 /** ExecContext bears the exec_context interface for Minor.  This nicely
  *  separates that interface from other classes such as Pipeline, MinorCPU
@@ -79,18 +79,17 @@ class ExecContext : public gem5::ExecContext
     SimpleThread &thread;
 
     /** The execute stage so we can peek at its contents. */
-    Execute &execute;
+    //Execute &execute;
 
     /** Instruction for the benefit of memory operations and for PC */
     MinorDynInstPtr inst;
 
     ExecContext (
         MinorCPU &cpu_,
-        SimpleThread &thread_, Execute &execute_,
+        SimpleThread &thread_,
         MinorDynInstPtr inst_) :
         cpu(cpu_),
         thread(thread_),
-        execute(execute_),
         inst(inst_)
     {
         DPRINTF(MinorExecute, "ExecContext setting PC: %s\n", *inst->pc);
@@ -111,7 +110,7 @@ class ExecContext : public gem5::ExecContext
                     const std::vector<bool>& byte_enable) override
     {
         assert(byte_enable.size() == size);
-        return execute.getLSQ().pushRequest(inst, true /* load */, nullptr,
+        return cpu.getLSQ().pushRequest(inst, true /* load */, nullptr,
             size, addr, flags, nullptr, nullptr, byte_enable);
     }
 
@@ -130,7 +129,7 @@ class ExecContext : public gem5::ExecContext
         override
     {
         assert(byte_enable.size() == size);
-        return execute.getLSQ().pushRequest(inst, false /* store */, data,
+        return cpu.getLSQ().pushRequest(inst, false /* store */, data,
             size, addr, flags, res, nullptr, byte_enable);
     }
 
@@ -139,7 +138,7 @@ class ExecContext : public gem5::ExecContext
                    AtomicOpFunctorPtr amo_op) override
     {
         // AMO requests are pushed through the store path
-        return execute.getLSQ().pushRequest(inst, false /* amo */, nullptr,
+        return cpu.getLSQ().pushRequest(inst, false /* amo */, nullptr,
             size, addr, flags, nullptr, std::move(amo_op),
             std::vector<bool>(size, true));
     }

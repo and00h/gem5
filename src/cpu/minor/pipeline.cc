@@ -73,8 +73,19 @@ Pipeline::Pipeline(MinorCPU &cpu_, const BaseMinorCPUParams &params) :
         params.decodeToExecuteForwardDelay),
     eToF1(cpu.name() + ".eToF1", "branch",
         params.executeBranchDelay),
+    eToW(cpu.name() + ".eToW", "insts", params.executeBranchDelay), // TODO change parameter
+    writeback(cpu.name() + ".writeback", cpu, params,
+        eToW.output(), eToF1.input()),
     execute(cpu.name() + ".execute", cpu, params,
-        dToE.output(), eToF1.input()),
+        dToE.output(), eToF1.input(), writeback.inputBuffer, eToW.input()),
+    lsq(cpu.name() + ".lsq", cpu.name() + ".dcache_port",
+        cpu_, *this,
+        params.executeMaxAccessesInMemory,
+        params.executeMemoryWidth,
+        params.executeLSQRequestsQueueSize,
+        params.executeLSQTransfersQueueSize,
+        params.executeLSQStoreBufferSize,
+        params.executeLSQMaxStoreBufferStoresPerCycle),
     /*decode(cpu.name() + ".decode", cpu, params,
         f2ToD.output(), dToE.input(), execute.inputBuffer),*/
     decode(cpu.name() + ".decode", cpu, params,
@@ -130,6 +141,8 @@ Pipeline::minorTrace() const
     dToE.minorTrace();
     execute.minorTrace();
     eToF1.minorTrace();
+    writeback.minorTrace();
+    eToW.minorTrace();
     activityRecorder.minorTrace();
 }
 
@@ -142,6 +155,7 @@ Pipeline::evaluate()
     /* Note that it's important to evaluate the stages in order to allow
      *  'immediate', 0-time-offset TimeBuffer activity to be visible from
      *  later stages to earlier ones in the same cycle */
+    writeback.evaluate();
     execute.evaluate();
     decode.evaluate();
     //fetch2.evaluate();
@@ -179,6 +193,7 @@ Pipeline::evaluate()
         activityRecorder.deactivateStage(Pipeline::Fetch2StageId);
         activityRecorder.deactivateStage(Pipeline::DecodeStageId);
         activityRecorder.deactivateStage(Pipeline::ExecuteStageId);
+        activityRecorder.deactivateStage(Pipeline::WritebackStageId);
     }
 
     if (needToSignalDrained) /* Must be draining */
@@ -191,6 +206,11 @@ Pipeline::evaluate()
             stop();
         }
     }
+}
+
+std::vector<Scoreboard>& 
+Pipeline::getScoreboard() { 
+    return execute.getScoreboard(); 
 }
 
 MinorCPU::MinorCPUPort &
@@ -218,6 +238,7 @@ Pipeline::drain()
         " Execution should drain naturally\n");
 
     execute.drain();
+    writeback.drain();
 
     /* Make sure that needToSignalDrained isn't accidentally set if we
      *  are 'pre-drained' */
@@ -237,6 +258,7 @@ Pipeline::drainResume()
     }
 
     execute.drainResume();
+    writeback.drainResume();
 }
 
 bool

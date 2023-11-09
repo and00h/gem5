@@ -1,40 +1,3 @@
-/*
- * Copyright (c) 2013-2014 ARM Limited
- * All rights reserved
- *
- * The license below extends only to copyright in the software and shall
- * not be construed as granting a license to any other intellectual
- * property including but not limited to intellectual property relating
- * to a hardware implementation of the functionality of the software
- * licensed hereunder.  You may use the software subject to the license
- * terms below provided that you ensure that this notice is replicated
- * unmodified and in its entirety in all distributions of the software,
- * modified or unmodified, in source code or in binary form.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met: redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer;
- * redistributions in binary form must reproduce the above copyright
- * notice, this list of conditions and the following disclaimer in the
- * documentation and/or other materials provided with the distribution;
- * neither the name of the copyright holders nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
 /**
  * @file
  *
@@ -42,8 +5,8 @@
  *  instruction stream info. to Fetch1.
  */
 
-#ifndef __CPU_MINOR_EXECUTE_HH__
-#define __CPU_MINOR_EXECUTE_HH__
+#ifndef __CPU_MINOR_MEMORY_HH__
+#define __CPU_MINOR_MEMORY_HH__
 
 #include <vector>
 
@@ -63,9 +26,10 @@ GEM5_DEPRECATED_NAMESPACE(Minor, minor);
 namespace minor
 {
 
+class ExecContext;
 /** Execute stage.  Everything apart from fetching and decoding instructions.
  *  The LSQ lives here too. */
-class Execute : public Named
+class Writeback : public Named
 {
   protected:
 
@@ -73,29 +37,22 @@ class Execute : public Named
     Latch<ForwardInstData>::Output inp;
 
     /** Input port carrying stream changes to Fetch1 */
-    Latch<BranchData>::Input out;
-
-    Latch<ForwardInstData>::Input insts_out;
+    //Latch<BranchData>::Input out;
 
     /** Pointer back to the containing CPU */
     MinorCPU &cpu;
 
     /** Number of instructions that can be issued per cycle */
-    unsigned int issueLimit;
+    //unsigned int issueLimit;
 
     /** Number of memory ops that can be issued per cycle */
     unsigned int memoryIssueLimit;
 
     /** Number of instructions that can be committed per cycle */
-    unsigned int commitLimit;
+    //unsigned int commitLimit;
 
     /** Number of memory instructions that can be committed per cycle */
     unsigned int memoryCommitLimit;
-
-    std::vector<InputBuffer<ForwardInstData>> &nextStageReserve;
-
-    /** Width of output of this stage/input of next in instructions */
-    unsigned int outputWidth;
 
     /** If true, more than one input line can be processed each cycle if
      *  there is room to execute more instructions than taken from the first
@@ -103,14 +60,14 @@ class Execute : public Named
     bool processMoreThanOneInput;
 
     /** Descriptions of the functional units we want to generate */
-    MinorFUPool &fuDescriptions;
+    //MinorFUPool &fuDescriptions;
 
     /** Number of functional units to produce */
-    unsigned int numFuncUnits;
+    //unsigned int numFuncUnits;
 
     /** Longest latency of any FU, useful for setting up the activity
      *  recoder */
-    Cycles longestFuLatency;
+    //Cycles longestFuLatency;
 
     /** Modify instruction trace times on commit */
     bool setTraceTimeOnCommit;
@@ -124,21 +81,19 @@ class Execute : public Named
 
     /** The FU index of the non-existent costless FU for instructions
      *  which pass the MinorDynInst::isNoCostInst test */
-    unsigned int noCostFUIndex;
+    //unsigned int noCostFUIndex;
 
     /** Dcache port to pass on to the CPU.  Execute owns this */
-    //LSQ& lsq;
-
-
-  public: 
-  /* Public for Pipeline to be able to pass it to Decode */
-    std::vector<InputBuffer<ForwardInstData>> inputBuffer;
+    LSQ lsq;
 
     /** Scoreboard of instruction dependencies */
-    std::vector<Scoreboard> scoreboard;
+    //std::vector<Scoreboard> scoreboard;
 
     /** The execution functional units */
-    std::vector<FUPipeline *> funcUnits;
+    //std::vector<FUPipeline *> funcUnits;
+
+  public: /* Public for Pipeline to be able to pass it to Decode */
+    std::vector<InputBuffer<ForwardInstData>> inputBuffer;
 
   protected:
     /** Stage cycle-by-cycle state */
@@ -273,30 +228,6 @@ class Execute : public Named
      *  signalled and invoked */
     bool takeInterrupt(ThreadID thread_id, BranchData &branch);
 
-    /** Issues a non-cost instruction to the specified thread's
-     * noCost functional unit */
-    void issueNoCostInst(ThreadID thread_id, MinorDynInstPtr inst);
-
-    /** Inserts an instruction into a functional unit pipeline for
-      * execution, and marks its destinations as busy in the scoreboard.*/
-    void insertIntoFU(ThreadID thread_id, MinorDynInstPtr inst,
-        MinorFUTiming *timing, int fu_index);
-
-    /** Determines if an instruction can be issued to a given functional
-     *  unit pipeline. Returns true if the functional unit is capable of
-     *  executing the instruction's operation class, is not currently
-     *  busy, not stalled, and can insert the instruction without
-     *  delaying other queued instructions. Returns false otherwise. */
-    bool canFUIssueInst(MinorDynInstPtr inst, FUPipeline* fu, int fu_index);
-
-    /** Attempts to issue an instruction to a functional unit pipeline.
-     * Returns true if the instruction is issued correctly. Returns false
-     * otherwise */
-    bool tryIssueInstruction(ThreadID thread_id, const MinorDynInstPtr &inst,
-        unsigned int &fu_index, bool &discarded, bool &issued_mem_ref);
-
-
-
     /** Try and issue instructions from the inputBuffer */
     unsigned int issue(ThreadID thread_id);
 
@@ -345,25 +276,6 @@ class Execute : public Named
     void commit(ThreadID thread_id, bool only_commit_microops, bool discard,
         BranchData &branch);
 
-    void sendOutput(ThreadID thread_id, bool only_commit_microops, bool discard,
-        BranchData &branch);
-
-    void packIntoOutput(
-    MinorDynInstPtr output_inst,
-    ForwardInstData &insts_out,
-    unsigned int *output_index)
-{
-    /* Correctly size the output before writing */
-    if (*output_index == 0) {
-        insts_out.resize(outputWidth);
-    }
-
-    /* Push into output */
-    insts_out.insts[*output_index] = output_inst;
-
-    (*output_index) += 1;
-}
-
     /** Set the drain state (with useful debugging messages) */
     void setDrainState(ThreadID thread_id, DrainState state);
 
@@ -373,15 +285,13 @@ class Execute : public Named
     ThreadID getIssuingThread();
 
   public:
-    Execute(const std::string &name_,
+    Writeback(const std::string &name_,
         MinorCPU &cpu_,
         const BaseMinorCPUParams &params,
         Latch<ForwardInstData>::Output inp_,
-        Latch<BranchData>::Input out_,
-        std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer,
-        Latch<ForwardInstData>::Input insts_out_);
+        Latch<BranchData>::Input out_);
 
-    ~Execute();
+    ~Writeback();
 
   public:
 
@@ -389,7 +299,7 @@ class Execute : public Named
     MinorCPU::MinorCPUPort &getDcachePort();
 
     /** To allow ExecContext to find the LSQ */
-    LSQ &getLSQ() { return cpu.getLSQ(); }
+    LSQ &getLSQ() { return lsq; }
 
     /** Does the given instruction have the right stream sequence number
      *  to be committed? */
@@ -411,62 +321,38 @@ class Execute : public Named
     /** Like the drain interface on SimObject */
     unsigned int drain();
     void drainResume();
-
-    std::vector<Scoreboard>& getScoreboard() { return scoreboard; }
+  
   /** Refactor methods */
   private:
    // Execute::commit()
-   /** Tries to commit memory responses (or discard them) */
-    void tryToHandleMemResponses(ExecuteThreadInfo &ex_info, bool discard_inst,
+    void tryToHandleMemResponses(ExecuteThreadInfo &ex_info, bool discard_inst, 
       bool &committed_inst,
       bool &completed_mem_ref,
       bool &completed_inst,
       MinorDynInstPtr inst,
-      LSQ::LSQRequestPtr mem_response,
+      LSQ::LSQRequestPtr mem_response, 
       BranchData &branch,
       Fault &fault);
-
-    /** Checks if an early memory issue is possible. If it is, sets completed_inst to true
-     * and sets inst to the instruction corresponding to the memory issue, so that it may be
-     * later committed.
-     */
-    void checkIfEarlyMemIssuePossible(ExecuteThreadInfo &ex_info, MinorDynInstPtr* inst, bool &try_to_commit, bool &early_memory_issue, bool &completed_inst, InstSeqNum head_exec_seq_num);
-
-    /** Check if the instruction has reached the end of a FU and can be committed.
-     * If it is, set try_to_commit and completed_inst to true
-     */
+    
+    void checkIfEarlyMemIssuePossible(ExecuteThreadInfo &ex_info, MinorDynInstPtr inst, bool &try_to_commit, bool &early_memory_issue, bool &completed_inst, InstSeqNum head_exec_seq_num);
     void checkIfCommitFromFUsPossible(const MinorDynInstPtr inst, bool &completed_inst, bool &try_to_commit, InstSeqNum head_exec_seq_num);
-    /** Check if the instruction needs further delay to commit. */
-    void checkExtraCommitDelay(ThreadID thread_id, MinorDynInstPtr const inst);
-
-    /** Actually try to commit the instruction. Commit fails if there are incomplete memory barriers
-     * there is extra commit delay to account for (see checkExtraCommitDelay) or commitInst returns false.
-     * If the instruction has been completed, unstall its functional unit.
-    */
-    bool tryCommit(ThreadID thread_id,
-      const MinorDynInstPtr inst,
+    void checkExtraCommitDelay(ThreadID thread_id, MinorDynInstPtr inst);
+    bool tryCommit(ThreadID thread_id, 
+      MinorDynInstPtr inst, 
       BranchData &branch, Fault &fault,
       Cycles now,
-      bool discard_inst,
+      bool discard_inst, 
       bool early_memory_issue,
       bool committed_inst,
       bool issued_mem_ref
     );
 
-    /** Update commit statistics */
-    void doCommitAccounting(MinorDynInstPtr const inst, ExecuteThreadInfo &ex_info, unsigned int &num_insts_committed, unsigned int &num_mem_refs_committed, bool completed_mem_ref);
-    /** Final commit operations. Pop the instruction from the queue of instructions in memory FUs (if it was a memory instruction),
-     * pop the instruction from the queue of in-flight instructions (if it wasn't a memory instruction), complete the memory
-     * barrier (if it was a memory barrier instruction) and update the scoreboard.
-    */
-    void finalizeCompletedInstruction(ThreadID thread_id, const MinorDynInstPtr inst, ExecuteThreadInfo &ex_info, const Fault &fault, bool issued_mem_ref, bool committed_inst);
+    void doCommitAccounting(MinorDynInstPtr inst, ExecuteThreadInfo &ex_info, unsigned int &num_insts_committed, unsigned int &num_mem_refs_committed, bool completed_mem_ref);
+    void finalizeCompletedInstruction(ThreadID thread_id, MinorDynInstPtr inst, ExecuteThreadInfo &ex_info, const Fault &fault, bool issued_mem_ref, bool committed_inst);
 
     // Execute::commitInst()
-    /** Calculate the effective address and issue the access to memory */
     void startMemRefExecution(MinorDynInstPtr inst, BranchData &branch, Fault &fault, gem5::ThreadContext *thread, bool early_memory_issue, bool &completed_inst, bool &completed_mem_issue);
-    /** Perform the actual execution of the instruction. If a fault happened, invoke it. */
-    void actuallyExecuteInst(ThreadID thread_id, MinorDynInstPtr inst, Fault &fault, gem5::ThreadContext *thread, bool &committed);
-    /** Check if the thread has been suspended. */
+    void actuallyExecuteInst(MinorDynInstPtr inst, Fault &fault, ExecContext &context, gem5::ThreadContext *thread, bool &committed);
     void checkSuspension(ThreadID thread_id, MinorDynInstPtr inst, gem5::ThreadContext *thread, BranchData &branch);
 };
 

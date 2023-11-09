@@ -80,7 +80,7 @@ LSQ::LSQRequest::tryToSuppressFault()
 {
     SimpleThread &thread = *port.cpu.threads[inst->id.threadId];
     std::unique_ptr<PCStateBase> old_pc(thread.pcState().clone());
-    ExecContext context(port.cpu, thread, port.execute, inst);
+    ExecContext context(port.cpu, thread, inst);
     [[maybe_unused]] Fault fault = inst->translationFault;
 
     // Give the instruction a chance to suppress a translation fault
@@ -103,7 +103,7 @@ LSQ::LSQRequest::completeDisabledMemAccess()
     SimpleThread &thread = *port.cpu.threads[inst->id.threadId];
     std::unique_ptr<PCStateBase> old_pc(thread.pcState().clone());
 
-    ExecContext context(port.cpu, thread, port.execute, inst);
+    ExecContext context(port.cpu, thread, inst);
 
     context.setMemAccPredicate(false);
     inst->staticInst->completeAcc(nullptr, &context, inst->traceData);
@@ -997,7 +997,7 @@ LSQ::tryToSendToTransfers(LSQRequestPtr request)
         return;
     }
 
-    if (!execute.instIsRightStream(request->inst)) {
+    if (!pipeline.instIsRightStream(request->inst)) {
         /* Wrong stream, try to abort the transfer but only do so if
          *  there are no packets in flight */
         if (request->hasPacketsInMemSystem()) {
@@ -1062,7 +1062,7 @@ LSQ::tryToSendToTransfers(LSQRequestPtr request)
      *  its stream sequence number was checked above) for loads which must
      *  not be speculatively issued and stores which must be issued here */
     if (!bufferable) {
-        if (!execute.instIsHeadInst(request->inst)) {
+        if (!pipeline.instIsHeadInst(request->inst)) {
             DPRINTF(MinorMem, "Memory access not the head inst., can't be"
                 " sure it can be performed, not issuing\n");
             return;
@@ -1131,7 +1131,7 @@ LSQ::tryToSendToTransfers(LSQRequestPtr request)
         SimpleThread &thread = *cpu.threads[request->inst->id.threadId];
 
         std::unique_ptr<PCStateBase> old_pc(thread.pcState().clone());
-        ExecContext context(cpu, thread, execute, request->inst);
+        ExecContext context(cpu, thread, request->inst);
 
         /* Handle LLSC requests and tests */
         if (is_load) {
@@ -1401,14 +1401,14 @@ LSQ::recvReqRetry()
 }
 
 LSQ::LSQ(std::string name_, std::string dcache_port_name_,
-    MinorCPU &cpu_, Execute &execute_,
+    MinorCPU &cpu_, Pipeline &pipeline_,
     unsigned int in_memory_system_limit, unsigned int line_width,
     unsigned int requests_queue_size, unsigned int transfers_queue_size,
     unsigned int store_buffer_size,
     unsigned int store_buffer_cycle_store_limit) :
     Named(name_),
     cpu(cpu_),
-    execute(execute_),
+    pipeline(pipeline_),
     dcachePort(dcache_port_name_, *this, cpu_),
     lastMemBarrier(cpu.numThreads, 0),
     state(MemoryRunning),

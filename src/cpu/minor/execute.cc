@@ -65,30 +65,27 @@ Execute::Execute(const std::string &name_,
     MinorCPU &cpu_,
     const BaseMinorCPUParams &params,
     Latch<ForwardInstData>::Output inp_,
-    Latch<BranchData>::Input out_) :
+    Latch<BranchData>::Input out_, 
+    std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer,
+    Latch<ForwardInstData>::Input insts_out_) :
     Named(name_),
     inp(inp_),
     out(out_),
+    insts_out(insts_out_),
     cpu(cpu_),
+    nextStageReserve(next_stage_input_buffer),
+    outputWidth(1),
+    processMoreThanOneInput(params.decodeCycleInput),
     issueLimit(params.executeIssueLimit),
     memoryIssueLimit(params.executeMemoryIssueLimit),
     commitLimit(params.executeCommitLimit),
     memoryCommitLimit(params.executeMemoryCommitLimit),
-    processMoreThanOneInput(params.executeCycleInput),
     fuDescriptions(*params.executeFuncUnits),
     numFuncUnits(fuDescriptions.funcUnits.size()),
     setTraceTimeOnCommit(params.executeSetTraceTimeOnCommit),
     setTraceTimeOnIssue(params.executeSetTraceTimeOnIssue),
     allowEarlyMemIssue(params.executeAllowEarlyMemoryIssue),
     noCostFUIndex(fuDescriptions.funcUnits.size() + 1),
-    lsq(name_ + ".lsq", name_ + ".dcache_port",
-        cpu_, *this,
-        params.executeMaxAccessesInMemory,
-        params.executeMemoryWidth,
-        params.executeLSQRequestsQueueSize,
-        params.executeLSQTransfersQueueSize,
-        params.executeLSQStoreBufferSize,
-        params.executeLSQMaxStoreBufferStoresPerCycle),
     executeInfo(params.numThreads,
             ExecuteThreadInfo(params.executeCommitLimit)),
     interruptPriority(0),
@@ -326,10 +323,11 @@ void
 Execute::handleMemResponse(MinorDynInstPtr inst,
     LSQ::LSQRequestPtr response, BranchData &branch, Fault &fault)
 {
+    LSQ& lsq = cpu.getLSQ();
     ThreadID thread_id = inst->id.threadId;
     ThreadContext *thread = cpu.getContext(thread_id);
 
-    ExecContext context(cpu, *cpu.threads[thread_id], *this, inst);
+    ExecContext context(cpu, *cpu.threads[thread_id], inst);
 
     PacketPtr packet = response->packet;
 
@@ -432,7 +430,7 @@ Execute::takeInterrupt(ThreadID thread_id, BranchData &branch)
         cpu.getInterruptController(thread_id)->updateIntrInfo();
         interrupt->invoke(cpu.getContext(thread_id));
 
-        assert(!lsq.accessesInFlight());
+        assert(!cpu.getLSQ().accessesInFlight());
 
         DPRINTF(MinorInterrupt, "Invoking interrupt: %s to PC: %s\n",
             interrupt->name(), cpu.getContext(thread_id)->pcState());
@@ -456,7 +454,7 @@ Execute::executeMemRefInst(MinorDynInstPtr inst, BranchData &branch,
     /* Set to true if the mem op. is issued and sent to the mem system */
     passed_predicate = false;
 
-    if (!lsq.canRequest()) {
+    if (!cpu.getLSQ().canRequest()) {
         /* Not acting on instruction yet as the memory
          * queues are full */
         issued = false;
@@ -464,7 +462,7 @@ Execute::executeMemRefInst(MinorDynInstPtr inst, BranchData &branch,
         ThreadContext *thread = cpu.getContext(inst->id.threadId);
         std::unique_ptr<PCStateBase> old_pc(thread->pcState().clone());
 
-        ExecContext context(cpu, *cpu.threads[inst->id.threadId], *this, inst);
+        ExecContext context(cpu, *cpu.threads[inst->id.threadId], inst);
 
         DPRINTF(MinorExecute, "Initiating memRef inst: %s\n", *inst);
 
@@ -507,7 +505,7 @@ Execute::executeMemRefInst(MinorDynInstPtr inst, BranchData &branch,
              * mis-prediction. */
             if (!inst->inLSQ) {
                 /* Leave it up to commit to handle the fault */
-                lsq.pushFailedRequest(inst);
+                cpu.getLSQ().pushFailedRequest(inst);
                 inst->inLSQ = true;
             }
         }
@@ -571,6 +569,7 @@ void
 Execute::insertIntoFU(ThreadID thread_id, MinorDynInstPtr inst,
     MinorFUTiming *timing, int fu_index)
 {
+    LSQ& lsq = cpu.getLSQ();
     ExecuteThreadInfo &thread = executeInfo[thread_id];
     FUPipeline *fu = funcUnits[fu_index];
     Cycles extra_dest_retire_lat = Cycles(0);
@@ -610,7 +609,7 @@ Execute::insertIntoFU(ThreadID thread_id, MinorDynInstPtr inst,
                 scoreboard[thread_id].execSeqNumToWaitFor(inst,
                     cpu.getContext(thread_id));
 
-            if (lsq.getLastMemBarrier(thread_id) >
+            if (cpu.getLSQ().getLastMemBarrier(thread_id) >
                 inst->instToWaitFor)
             {
                 DPRINTF(MinorExecute, "A barrier will"
@@ -834,7 +833,7 @@ Execute::issue(ThreadID thread_id)
                 inst->staticInst->isFullMemBarrier())
             {
                 DPRINTF(MinorMem, "Issuing memory barrier inst: %s\n", *inst);
-                lsq.issuedMemBarrierInst(inst);
+                cpu.getLSQ().issuedMemBarrierInst(inst);
             }
 
             if (inst->traceData && setTraceTimeOnIssue) {
@@ -1010,7 +1009,7 @@ void Execute::startMemRefExecution(MinorDynInstPtr inst, BranchData &branch, Fau
 }
 
 void Execute::actuallyExecuteInst(ThreadID thread_id, MinorDynInstPtr inst, Fault &fault, gem5::ThreadContext *thread, bool &committed) {
-    ExecContext context(cpu, *cpu.threads[thread_id], *this, inst);
+    ExecContext context(cpu, *cpu.threads[thread_id], inst);
 
     fault = inst->staticInst->execute(&context,
         inst->traceData);
@@ -1077,7 +1076,7 @@ Execute::commitInst(MinorDynInstPtr inst, bool early_memory_issue,
         panic("We should never hit the case where we try to commit from a "
               "suspended thread as the streamSeqNum should not match");
     } else if (inst->isFault()) {
-        ExecContext context(cpu, *cpu.threads[thread_id], *this, inst);
+        ExecContext context(cpu, *cpu.threads[thread_id], inst);
 
         DPRINTF(MinorExecute, "Fault inst reached Execute: %s\n",
             inst->fault->name());
@@ -1126,7 +1125,7 @@ Execute::commitInst(MinorDynInstPtr inst, bool early_memory_issue,
         }
         completed_mem_issue = completed_inst;
     } else if (inst->isInst() && inst->staticInst->isFullMemBarrier() &&
-        !lsq.canPushIntoStoreBuffer())
+        !cpu.getLSQ().canPushIntoStoreBuffer())
     {
         DPRINTF(MinorExecute, "Can't commit data barrier inst: %s yet as"
             " there isn't space in the store buffer\n", *inst);
@@ -1138,6 +1137,7 @@ Execute::commitInst(MinorDynInstPtr inst, bool early_memory_issue,
          * backwards, so no other branches may evaluate this cycle*/
         completed_inst = false;
     } else {
+        // MOVETO: WRITEBACK
         DPRINTF(MinorExecute, "Committing inst: %s\n", *inst);
 
         actuallyExecuteInst(thread_id, inst, fault, thread, committed);
@@ -1179,7 +1179,7 @@ Execute::tryToHandleMemResponses(
             " stream state was unexpected, expected: %d\n",
             *inst, ex_info.streamSeqNum);
 
-        lsq.popResponse(mem_response);
+        cpu.getLSQ().popResponse(mem_response);
     } else {
         handleMemResponse(inst, mem_response, branch, fault);
         committed_inst = true;
@@ -1299,6 +1299,7 @@ bool Execute::tryCommit(ThreadID thread_id,
     bool issued_mem_ref
 )
 {
+    LSQ& lsq = cpu.getLSQ();
     bool completed_inst = false;
     /* Is this instruction discardable as its streamSeqNum
         *  doesn't match? */
@@ -1413,11 +1414,12 @@ Execute::finalizeCompletedInstruction(ThreadID thread_id, const MinorDynInstPtr 
          *  clear its dependencies */
         ex_info.inFlightInsts->pop();
 
+        // MOVETO: Memory
         /* Complete barriers in the LSQ/move to store buffer */
         if (inst->isInst() && inst->staticInst->isFullMemBarrier()) {
             DPRINTF(MinorMem, "Completing memory barrier"
                 " inst: %s committed: %d\n", *inst, committed_inst);
-            lsq.completeMemBarrierInst(inst, committed_inst);
+            cpu.getLSQ().completeMemBarrierInst(inst, committed_inst);
         }
 
         scoreboard[thread_id].clearInstDests(inst, inst->isMemRef());
@@ -1436,7 +1438,7 @@ Execute::commit(ThreadID thread_id,
     Fault fault = NoFault;
     Cycles now = cpu.curCycle();
     ExecuteThreadInfo &ex_info = executeInfo[thread_id];
-
+    LSQ& lsq = cpu.getLSQ();
     /**
      * Try and execute as many instructions from the end of FU pipelines as
      *  possible.  This *doesn't* include actually advancing the pipelines.
@@ -1536,6 +1538,7 @@ Execute::commit(ThreadID thread_id,
         } else if (mem_response &&
             num_mem_refs_committed < memoryCommitLimit)
         {
+            // MOVETO: MEMORY
             discard_inst = inst->id.streamSeqNum !=
                            ex_info.streamSeqNum || discard;
             tryToHandleMemResponses(ex_info, discard_inst, committed_inst, completed_mem_ref, completed_inst, inst, mem_response, branch, fault);
@@ -1555,7 +1558,7 @@ Execute::commit(ThreadID thread_id,
              *  For any other case, leave it to the normal instruction
              *  issue below to handle them.
              */
-            if (!ex_info.inFUMemInsts->empty() && lsq.canRequest()) {
+            /* if (!ex_info.inFUMemInsts->empty() && lsq.canRequest()) {
                 DPRINTF(MinorExecute, "Trying to commit from mem FUs\n");
 
                 const MinorDynInstPtr head_mem_ref_inst =
@@ -1564,7 +1567,7 @@ Execute::commit(ThreadID thread_id,
                 const MinorDynInstPtr &fu_inst = fu->front().inst;
 
                 /* Use this, possibly out of order, inst as the one
-                 *  to 'commit'/send to the LSQ */
+                 *  to 'commit'/send to the LSQ
                 if (!fu_inst->isBubble() &&
                     !fu_inst->inLSQ &&
                     fu_inst->canEarlyIssue &&
@@ -1580,7 +1583,7 @@ Execute::commit(ThreadID thread_id,
                     early_memory_issue = true;
                     completed_inst = true;
                 }
-            }
+            } */
 
             /* Try and commit FU-less insts */
             if (!completed_inst && inst->isNoCostInst()) {
@@ -1710,11 +1713,299 @@ Execute::commit(ThreadID thread_id,
     }
 }
 
+void
+Execute::sendOutput(ThreadID thread_id,
+    bool only_commit_microops, /* true if only microops should be committed,
+                                  e.g. when an interrupt has occurred. This
+                                  avoids having partially executed instructions */
+    bool discard,              // discard all instructions
+    BranchData &branch         // Eventual branches get written here
+)
+{
+    Fault fault = NoFault;
+    Cycles now = cpu.curCycle();
+    ExecuteThreadInfo &ex_info = executeInfo[thread_id];
+    LSQ& lsq = cpu.getLSQ();
+    /**
+     * Try and execute as many instructions from the end of FU pipelines as
+     *  possible.  This *doesn't* include actually advancing the pipelines.
+     *
+     * We do this by looping on the front of the inFlightInsts queue for as
+     *  long as we can find the desired instruction at the end of the
+     *  functional unit it was issued to without seeing a branch or a fault.
+     *  In this function, these terms are used:
+     *      complete -- The instruction has finished its passage through
+     *          its functional unit and its fate has been decided
+     *          (committed, discarded, issued to the memory system)
+     *      commit -- The instruction is complete(d), not discarded and has
+     *          its effects applied to the CPU state
+     *      discard(ed) -- The instruction is complete but not committed
+     *          as its streamSeqNum disagrees with the current
+     *          Execute::streamSeqNum
+     *
+     *  Commits are also possible from two other places:
+     *
+     *  1) Responses returning from the LSQ
+     *  2) Mem ops issued to the LSQ ('committed' from the FUs) earlier
+     *      than their position in the inFlightInsts queue, but after all
+     *      their dependencies are resolved.
+     */
+
+    /* Has an instruction been completed?  Once this becomes false, we stop
+     *  trying to complete instructions. */
+    bool completed_inst = true;
+
+    /* Number of insts committed this cycle to check against commitLimit */
+    unsigned int num_insts_committed = 0;
+
+    /* Number of memory access instructions committed to check against
+     *  memCommitLimit */
+    unsigned int num_mem_refs_committed = 0;
+
+    if (only_commit_microops && !ex_info.inFlightInsts->empty()) {
+        DPRINTF(MinorInterrupt, "Only commit microops %s %d\n",
+            *(ex_info.inFlightInsts->front().inst),
+            ex_info.lastCommitWasEndOfMacroop);
+    }
+
+    while (!ex_info.inFlightInsts->empty() && /* Some more instructions to process */
+        !branch.isStreamChange() && /* No real branch */
+        fault == NoFault && /* No faults */
+        completed_inst && /* Still finding instructions to execute */
+        num_insts_committed != commitLimit /* Not reached commit limit */
+        )
+    {
+        if (only_commit_microops) {
+            DPRINTF(MinorInterrupt, "Committing tail of insts before"
+                " interrupt: %s\n",
+                *(ex_info.inFlightInsts->front().inst));
+        }
+
+        QueuedInst *head_inflight_inst = &(ex_info.inFlightInsts->front());
+
+        InstSeqNum head_exec_seq_num =
+            head_inflight_inst->inst->id.execSeqNum;
+
+        /* The instruction we actually process if completed_inst
+         *  remains true to the end of the loop body.
+         *  Start by considering the the head of the in flight insts queue */
+        MinorDynInstPtr inst = head_inflight_inst->inst;
+
+        bool committed_inst = false;
+        bool discard_inst = false;
+        bool completed_mem_ref = false;
+        bool issued_mem_ref = false;
+        bool early_memory_issue = false;
+
+        /* Must set this again to go around the loop */
+        completed_inst = false;
+
+        /* If we're just completing a macroop before an interrupt or drain,
+         *  can we stil commit another microop (rather than a memory response)
+         *  without crosing into the next full instruction? */
+        bool in_flight_insts = !ex_info.inFlightInsts->empty();
+        bool finished_macroop = only_commit_microops && ex_info.lastCommitWasEndOfMacroop;
+
+        bool can_commit_insts = in_flight_insts && !finished_macroop;
+
+        /* Can we find a mem response for this inst */
+        LSQ::LSQRequestPtr mem_response =
+            (inst->inLSQ ? lsq.findResponse(inst) : NULL);
+
+        DPRINTF(MinorExecute, "Trying to commit canCommitInsts: %d\n",
+            can_commit_insts);
+
+        /* Test for PC events after every instruction */
+        if (isInbetweenInsts(thread_id) && tryPCEvents(thread_id)) {
+            ThreadContext *thread = cpu.getContext(thread_id);
+
+            /* Branch as there was a change in PC */
+            updateBranchData(thread_id, BranchData::UnpredictedBranch,
+                MinorDynInst::bubble(), thread->pcState(), branch);
+        } else if (mem_response &&
+            num_mem_refs_committed < memoryCommitLimit)
+        {
+            // MOVETO: MEMORY
+            discard_inst = inst->id.streamSeqNum !=
+                           ex_info.streamSeqNum || discard;
+            tryToHandleMemResponses(ex_info, discard_inst, committed_inst, completed_mem_ref, completed_inst, inst, mem_response, branch, fault);
+        } else if (can_commit_insts) {
+            /* If true, this instruction will, subject to timing tweaks,
+             *  be considered for completion.  try_to_commit flattens
+             *  the `if' tree a bit and allows other tests for inst
+             *  commit to be inserted here. */
+            bool try_to_commit = false;
+
+            /* Try and issue memory ops early if they:
+             *  - Can push a request into the LSQ
+             *  - Have reached the end of their FUs
+             *  - Have had all their dependencies satisfied
+             *  - Are from the right stream
+             *
+             *  For any other case, leave it to the normal instruction
+             *  issue below to handle them.
+             */
+            if (!ex_info.inFUMemInsts->empty() && lsq.canRequest()) {
+                DPRINTF(MinorExecute, "Trying to commit from mem FUs\n");
+
+                const MinorDynInstPtr head_mem_ref_inst =
+                    ex_info.inFUMemInsts->front().inst;
+                FUPipeline *fu = funcUnits[head_mem_ref_inst->fuIndex];
+                const MinorDynInstPtr &fu_inst = fu->front().inst;
+
+                /* Use this, possibly out of order, inst as the one
+                 *  to 'commit'/send to the LSQ */
+                if (!fu_inst->isBubble() &&
+                    !fu_inst->inLSQ &&
+                    fu_inst->canEarlyIssue &&
+                    ex_info.streamSeqNum == fu_inst->id.streamSeqNum &&
+                    head_exec_seq_num > fu_inst->instToWaitFor)
+                {
+                    DPRINTF(MinorExecute, "Issuing mem ref early"
+                        " inst: %s instToWaitFor: %d\n",
+                        *(fu_inst), fu_inst->instToWaitFor);
+
+                    inst = fu_inst;
+                    try_to_commit = true;
+                    early_memory_issue = true;
+                    completed_inst = true;
+                }
+            }
+
+            /* Try and commit FU-less insts */
+            if (!completed_inst && inst->isNoCostInst()) {
+                DPRINTF(MinorExecute, "Committing no cost inst: %s", *inst);
+
+                try_to_commit = true;
+                completed_inst = true;
+            }
+
+            /* Try to issue from the ends of FUs and the inFlightInsts
+             *  queue */
+            checkIfCommitFromFUsPossible(inst, completed_inst, try_to_commit, head_exec_seq_num);
+
+            if (try_to_commit) {
+                discard_inst = inst->id.streamSeqNum !=
+                    ex_info.streamSeqNum || discard;
+                
+                /* Is this instruction discardable as its streamSeqNum
+                 *  doesn't match? */
+                if (!discard_inst) {
+                    /* Try to commit or discard a non-memory instruction.
+                     *  Memory ops are actually 'committed' from this FUs
+                     *  and 'issued' into the memory system so we need to
+                     *  account for them later (commit_was_mem_issue gets
+                     *  set) */
+                    if (inst->extraCommitDelayExpr) {
+                        DPRINTF(MinorExecute, "Evaluating expression for"
+                            " extra commit delay inst: %s\n", *inst);
+
+                        ThreadContext *thread = cpu.getContext(thread_id);
+
+                        TimingExprEvalContext context(inst->staticInst,
+                            thread, NULL);
+
+                        uint64_t extra_delay = inst->extraCommitDelayExpr->
+                            eval(context);
+
+                        DPRINTF(MinorExecute, "Extra commit delay expr"
+                            " result: %d\n", extra_delay);
+
+                        if (extra_delay < 128) {
+                            inst->extraCommitDelay += Cycles(extra_delay);
+                        } else {
+                            DPRINTF(MinorExecute, "Extra commit delay was"
+                                " very long: %d\n", extra_delay);
+                        }
+                        inst->extraCommitDelayExpr = NULL;
+                    }
+
+                    /* Move the extraCommitDelay from the instruction
+                     *  into the minimumCommitCycle */
+                    if (inst->extraCommitDelay != Cycles(0)) {
+                        inst->minimumCommitCycle = cpu.curCycle() +
+                            inst->extraCommitDelay;
+                        inst->extraCommitDelay = Cycles(0);
+                    }
+
+                    /* @todo Think about making lastMemBarrier be
+                     *  MAX_UINT_64 to avoid using 0 as a marker value */
+                    if (!inst->isFault() && inst->isMemRef() &&
+                        lsq.getLastMemBarrier(thread_id) <
+                            inst->id.execSeqNum &&
+                        lsq.getLastMemBarrier(thread_id) != 0)
+                    {
+                        DPRINTF(MinorExecute, "Not committing inst: %s yet"
+                            " as there are incomplete barriers in flight\n",
+                            *inst);
+                        completed_inst = false;
+                    } else if (inst->minimumCommitCycle > now) {
+                        DPRINTF(MinorExecute, "Not committing inst: %s yet"
+                            " as it wants to be stalled for %d more cycles\n",
+                            *inst, inst->minimumCommitCycle - now);
+                        completed_inst = false;
+                    } else {
+                        completed_inst = commitInst(inst,
+                            early_memory_issue, branch, fault,
+                            committed_inst, issued_mem_ref);
+                    }
+                } else {
+                    /* Discard instruction */
+                    completed_inst = true;
+                    inst->committed = true;
+                }
+
+                if (completed_inst) {
+                    /* Allow the pipeline to advance.  If the FU head
+                     *  instruction wasn't the inFlightInsts head
+                     *  but had already been committed, it would have
+                     *  unstalled the pipeline before here */
+                    if (inst->fuIndex != noCostFUIndex) {
+                        DPRINTF(MinorExecute, "Unstalling %d for inst %s\n", inst->fuIndex, inst->id);
+                        funcUnits[inst->fuIndex]->stalled = false;
+                    }
+                }
+            }
+        } else {
+            DPRINTF(MinorExecute, "No instructions to commit\n");
+            completed_inst = false;
+        }
+
+        /* All discardable instructions must also be 'completed' by now */
+        assert(!(discard_inst && !completed_inst));
+
+        /* Instruction committed but was discarded due to streamSeqNum
+         *  mismatch */
+        if (discard_inst) {
+            DPRINTF(MinorExecute, "Discarding inst: %s as its stream"
+                " state was unexpected, expected: %d\n",
+                *inst, ex_info.streamSeqNum);
+
+            if (fault == NoFault)
+                cpu.stats.numDiscardedOps++;
+        }
+
+        /* Mark the mem inst as being in the LSQ */
+        if (issued_mem_ref) {
+            inst->fuIndex = 0;
+            inst->inLSQ = true;
+        }
+        if (completed_inst) {
+            finalizeCompletedInstruction(thread_id, inst, ex_info, fault, issued_mem_ref, committed_inst);
+        }
+
+        /* Handle per-cycle instruction counting */
+        if (committed_inst) {
+            doCommitAccounting(inst, ex_info, num_insts_committed, num_mem_refs_committed, completed_mem_ref);
+        }
+    }
+}
+
 bool
 Execute::isInbetweenInsts(ThreadID thread_id) const
 {
     return executeInfo[thread_id].lastCommitWasEndOfMacroop &&
-        !lsq.accessesInFlight();
+        !cpu.getLSQ().accessesInFlight();
 }
 
 void
@@ -1724,12 +2015,12 @@ Execute::evaluate()
         inputBuffer[inp.outputWire->threadId].setTail(*inp.outputWire);
 
     BranchData &branch = *out.inputWire;
-
+    LSQ& lsq = cpu.getLSQ();
     unsigned int num_issued = 0;
 
     /* Do all the cycle-wise activities for dcachePort here to potentially
      *  free up input spaces in the LSQ's requests queue */
-    lsq.step();
+    lsq.step(); // MOVETO: MEMORY
 
     /* Check interrupts first.  Will halt commit if interrupt found */
     bool interrupted = false;
@@ -1957,7 +2248,7 @@ Execute::minorTrace() const
     std::ostringstream stalled;
 
     executeInfo[0].instsBeingCommitted.reportData(insts);
-    lsq.minorTrace();
+    cpu.getLSQ().minorTrace();
     inputBuffer[0].minorTrace();
     scoreboard[0].minorTrace();
 
@@ -1987,7 +2278,7 @@ inline ThreadID
 Execute::getCommittingThread()
 {
     std::vector<ThreadID> priority_list;
-
+    LSQ& lsq = cpu.getLSQ();
     switch (cpu.threadPolicy) {
       case enums::SingleThreaded:
           return 0;
@@ -2146,7 +2437,7 @@ Execute::drain()
 bool
 Execute::isDrained()
 {
-    if (!lsq.isDrained())
+    if (!cpu.getLSQ().isDrained())
         return false;
 
     for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
@@ -2189,7 +2480,7 @@ Execute::instIsHeadInst(MinorDynInstPtr inst)
 MinorCPU::MinorCPUPort &
 Execute::getDcachePort()
 {
-    return lsq.getDcachePort();
+    return cpu.getLSQ().getDcachePort();
 }
 
 } // namespace minor
