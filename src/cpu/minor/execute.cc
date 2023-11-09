@@ -72,7 +72,7 @@ Execute::Execute(const std::string &name_,
     Named(name_),
     inp(inp_),
     out(out_),
-    insts_out(insts_out_),
+    out_insts(insts_out_),
     cpu(cpu_),
     nextStageReserve(next_stage_input_buffer),
     outputWidth(1),
@@ -1089,7 +1089,7 @@ void Execute::checkSuspension(ThreadID thread_id, MinorDynInstPtr inst, gem5::Th
 }
 
 bool
-Execute::commitInst(MinorDynInstPtr inst, bool early_memory_issue,
+Execute::commitInst(MinorDynInstPtr inst, ForwardInstData &insts_out, unsigned int *output_index, bool early_memory_issue,
     BranchData &branch, Fault &fault, bool &committed,
     bool &completed_mem_issue)
 {
@@ -1169,11 +1169,12 @@ Execute::commitInst(MinorDynInstPtr inst, bool early_memory_issue,
         completed_inst = false;
     } else {
         // MOVETO: WRITEBACK
-        DPRINTF(MinorExecute, "Committing inst: %s\n", *inst);
+        DPRINTF(MinorExecute, "Sending inst to writeback: %s\n", *inst);
 
-        actuallyExecuteInst(thread_id, inst, fault, thread, committed);
+        packIntoOutput(inst, insts_out, output_index);
+        //actuallyExecuteInst(thread_id, inst, fault, thread, committed);
 
-        doInstCommitAccounting(inst);
+        //doInstCommitAccounting(inst);
         tryToBranch(inst, fault, branch);
     }
 
@@ -1360,9 +1361,9 @@ bool Execute::tryCommit(ThreadID thread_id,
                     inst, inst->minimumCommitCycle - now);
             completed_inst = false;
         } else {
-            completed_inst = commitInst(inst,
-                early_memory_issue, branch, fault,
-                committed_inst, issued_mem_ref);
+//            completed_inst = commitInst(inst,
+//                early_memory_issue, branch, fault,
+//                committed_inst, issued_mem_ref);
         }
     } else {
         /* Discard instruction */
@@ -1689,9 +1690,9 @@ Execute::commit(ThreadID thread_id,
                             *inst, inst->minimumCommitCycle - now);
                         completed_inst = false;
                     } else {
-                        completed_inst = commitInst(inst,
-                            early_memory_issue, branch, fault,
-                            committed_inst, issued_mem_ref);
+                        //completed_inst = commitInst(inst,
+                        //    early_memory_issue, branch, fault,
+                        //    committed_inst, issued_mem_ref);
                     }
                 } else {
                     /* Discard instruction */
@@ -1745,7 +1746,7 @@ Execute::commit(ThreadID thread_id,
 }
 
 void
-Execute::sendOutput(ThreadID thread_id,
+Execute::sendOutput(ThreadID thread_id, ForwardInstData &insts_out, unsigned int *output_index,
     bool only_commit_microops, /* true if only microops should be committed,
                                   e.g. when an interrupt has occurred. This
                                   avoids having partially executed instructions */
@@ -1976,7 +1977,7 @@ Execute::sendOutput(ThreadID thread_id,
                             *inst, inst->minimumCommitCycle - now);
                         completed_inst = false;
                     } else {
-                        completed_inst = commitInst(inst,
+                        completed_inst = commitInst(inst, insts_out, output_index,
                             early_memory_issue, branch, fault,
                             committed_inst, issued_mem_ref);
                     }
@@ -2046,6 +2047,9 @@ Execute::evaluate()
         inputBuffer[inp.outputWire->threadId].setTail(*inp.outputWire);
 
     BranchData &branch = *out.inputWire;
+    ForwardInstData &insts_out = *out_insts.inputWire;
+    unsigned int output_index = 0;
+
     LSQ& lsq = cpu.getLSQ();
     unsigned int num_issued = 0;
 
@@ -2056,6 +2060,7 @@ Execute::evaluate()
     /* Check interrupts first.  Will halt commit if interrupt found */
     bool interrupted = false;
     ThreadID interrupt_tid = checkInterrupts(branch, interrupted);
+    ThreadID commit_tid = getCommittingThread();
 
     if (interrupt_tid != InvalidThreadID) {
         /* Signalling an interrupt this cycle, not issuing/committing from
@@ -2066,52 +2071,8 @@ Execute::evaluate()
         DPRINTF(MinorInterrupt, "Execute skipping a cycle to allow old"
             " branch to complete\n");
     } else {
-        ThreadID commit_tid = getCommittingThread();
+        attemptCommit(commit_tid, insts_out, &output_index, branch, interrupted);
 
-        if (commit_tid != InvalidThreadID) {
-            ExecuteThreadInfo& commit_info = executeInfo[commit_tid];
-
-            DPRINTF(MinorExecute, "Attempting to commit [tid:%d]\n",
-                    commit_tid);
-            /* commit can set stalled flags observable to issue and so *must* be
-             *  called first */
-            if (commit_info.drainState != NotDraining) {
-                if (commit_info.drainState == DrainCurrentInst) {
-                    /* Commit only micro-ops, don't kill anything else */
-                    commit(commit_tid, true, false, branch);
-
-                    if (isInbetweenInsts(commit_tid))
-                        setDrainState(commit_tid, DrainHaltFetch);
-
-                    /* Discard any generated branch */
-                    branch = BranchData::bubble();
-                } else if (commit_info.drainState == DrainAllInsts) {
-                    /* Kill all instructions */
-                    while (getInput(commit_tid))
-                        popInput(commit_tid);
-                    commit(commit_tid, false, true, branch);
-                }
-            } else {
-                /* Commit micro-ops only if interrupted.  Otherwise, commit
-                 *  anything you like */
-                DPRINTF(MinorExecute, "Committing micro-ops for interrupt[tid:%d]\n",
-                        commit_tid);
-                bool only_commit_microops = interrupted &&
-                                            hasInterrupt(commit_tid);
-                commit(commit_tid, only_commit_microops, false, branch);
-            }
-
-            /* Halt fetch, but don't do it until we have the current instruction in
-             *  the bag */
-            if (commit_info.drainState == DrainHaltFetch) {
-                updateBranchData(commit_tid, BranchData::HaltFetch,
-                        MinorDynInst::bubble(),
-                        cpu.getContext(commit_tid)->pcState(), branch);
-
-                cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
-                setDrainState(commit_tid, DrainAllInsts);
-            }
-        }
         ThreadID issue_tid = getIssuingThread();
         /* This will issue merrily even when interrupted in the sure and
          *  certain knowledge that the interrupt with change the stream */
@@ -2126,71 +2087,15 @@ Execute::evaluate()
     /* Run logic to step functional units + decide if we are active on the next
      * clock cycle */
     std::vector<MinorDynInstPtr> next_issuable_insts;
-    bool can_issue_next = false;
-
-    for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
-        /* Find the next issuable instruction for each thread and see if it can
-           be issued */
-        if (getInput(tid)) {
-            unsigned int input_index = executeInfo[tid].inputIndex;
-            MinorDynInstPtr inst = getInput(tid)->insts[input_index];
-            if (inst->isFault()) {
-                can_issue_next = true;
-            } else if (!inst->isBubble()) {
-                next_issuable_insts.push_back(inst);
-            }
-        }
-    }
+    bool can_issue_next = checkForIssuableInsts(next_issuable_insts);
 
     bool becoming_stalled = true;
 
     /* Advance the pipelines and note whether they still need to be
      * advanced */
-    for (unsigned int i = 0; i < numFuncUnits; i++) {
-        FUPipeline *fu = funcUnits[i];
-        fu->advance();
+    advanceFunctionalUnits(next_issuable_insts, becoming_stalled, can_issue_next);
 
-        /* If we need to tick again, the pipeline will have been left or set
-         * to be unstalled */
-        if (fu->occupancy !=0 && !fu->stalled)
-            becoming_stalled = false;
-
-        /* Could we possibly issue the next instruction from any thread?
-         * This is quite an expensive test and is only used to determine
-         * if the CPU should remain active, only run it if we aren't sure
-         * we are active next cycle yet */
-        for (auto inst : next_issuable_insts) {
-            if (!fu->stalled && fu->provides(inst->staticInst->opClass()) &&
-                scoreboard[inst->id.threadId].canInstIssue(inst,
-                    NULL, NULL, cpu.curCycle() + Cycles(1),
-                    cpu.getContext(inst->id.threadId))) {
-                can_issue_next = true;
-                break;
-            }
-        }
-    }
-
-    bool head_inst_might_commit = false;
-
-    /* Could the head in flight insts be committed */
-    for (auto const &info : executeInfo) {
-        if (!info.inFlightInsts->empty()) {
-            const QueuedInst &head_inst = info.inFlightInsts->front();
-
-            if (head_inst.inst->isNoCostInst()) {
-                head_inst_might_commit = true;
-            } else {
-                FUPipeline *fu = funcUnits[head_inst.inst->fuIndex];
-                if ((fu->stalled &&
-                     fu->front().inst->id == head_inst.inst->id) ||
-                     lsq.findResponse(head_inst.inst))
-                {
-                    head_inst_might_commit = true;
-                    break;
-                }
-            }
-        }
-    }
+    bool head_inst_might_commit = headInstMightCommit(lsq);
 
     DPRINTF(Activity, "Need to tick num issued insts: %s%s%s%s%s%s\n",
        (num_issued != 0 ? " (issued some insts)" : ""),
@@ -2205,7 +2110,7 @@ Execute::evaluate()
        !becoming_stalled || /* Some FU pipelines can still move */
        can_issue_next || /* Can still issue a new inst */
        head_inst_might_commit || /* Could possible commit the next inst */
-       lsq.needsToTick() || /* Must step the dcache port */
+       lsq.needsToTick() || /* Must step the dcache port */ //MOVETO:MEMORY
        interrupted; /* There are pending interrupts */
 
     if (!need_to_tick) {
@@ -2218,8 +2123,15 @@ Execute::evaluate()
         cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
 
     /* Note activity of following buffer */
-    if (!branch.isBubble())
+    if (!branch.isBubble() || !insts_out.isBubble()) {
         cpu.activityRecorder->activity();
+    }
+
+    if (!insts_out.isBubble()) {
+        /* Note activity of following buffer */
+        insts_out.threadId = commit_tid;
+        nextStageReserve[commit_tid].reserve();
+    }
 
     /* Make sure the input (if any left) is pushed */
     if (!inp.outputWire->isBubble())
@@ -2512,6 +2424,127 @@ MinorCPU::MinorCPUPort &
 Execute::getDcachePort()
 {
     return cpu.getLSQ().getDcachePort();
+}
+
+bool
+Execute::checkForIssuableInsts(std::vector<MinorDynInstPtr> &next_issuable_insts)
+{
+    bool can_issue_next = false;
+    for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
+        if (getInput(tid)) {
+            unsigned int input_index = executeInfo[tid].inputIndex;
+            MinorDynInstPtr inst = getInput(tid)->insts[input_index];
+            if (inst->isFault()) {
+                can_issue_next = true;
+            } else if (!inst->isBubble()) {
+                next_issuable_insts.push_back(inst);
+            }
+        }
+    }
+    return can_issue_next;
+}
+
+void
+Execute::advanceFunctionalUnits(std::vector<MinorDynInstPtr> &next_issuable_insts, bool &becoming_stalled, bool &can_issue_next)
+{
+    for (unsigned int i = 0; i < numFuncUnits; i++) {
+        FUPipeline *fu = funcUnits[i];
+        fu->advance();
+
+        /* If we need to tick again, the pipeline will have been left or set
+        * to be unstalled */
+        if (fu->occupancy !=0 && !fu->stalled)
+            becoming_stalled = false;
+
+        /* Could we possibly issue the next instruction from any thread?
+        * This is quite an expensive test and is only used to determine
+        * if the CPU should remain active, only run it if we aren't sure
+        * we are active next cycle yet */
+        for (auto inst : next_issuable_insts) {
+            if (!fu->stalled && fu->provides(inst->staticInst->opClass()) &&
+            scoreboard[inst->id.threadId].canInstIssue(inst,
+                                                       NULL, NULL, cpu.curCycle() + Cycles(1),
+                                                       cpu.getContext(inst->id.threadId))) {
+                can_issue_next = true;
+                break;
+            }
+        }
+    }
+}
+
+bool Execute::headInstMightCommit(LSQ &lsq)
+{
+    bool head_inst_might_commit = false;
+
+    /* Could the head in flight insts be committed */
+    for (auto const &info : executeInfo) {
+        if (!info.inFlightInsts->empty()) {
+            const QueuedInst &head_inst = info.inFlightInsts->front();
+
+            if (head_inst.inst->isNoCostInst()) {
+                head_inst_might_commit = true;
+            } else {
+                FUPipeline *fu = funcUnits[head_inst.inst->fuIndex];
+                if ((fu->stalled &&
+                     fu->front().inst->id == head_inst.inst->id) ||
+                    lsq.findResponse(head_inst.inst))
+                {
+                    head_inst_might_commit = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    return head_inst_might_commit;
+}
+
+void Execute::attemptCommit(ThreadID commit_tid, ForwardInstData &insts_out, unsigned int *output_index, BranchData &branch, bool interrupted)
+{
+    if (commit_tid != InvalidThreadID) {
+        ExecuteThreadInfo& commit_info = executeInfo[commit_tid];
+
+        DPRINTF(MinorExecute, "Attempting to commit [tid:%d]\n",
+                commit_tid);
+        /* commit can set stalled flags observable to issue and so *must* be
+         *  called first */
+        if (commit_info.drainState != NotDraining) {
+            if (commit_info.drainState == DrainCurrentInst) {
+                /* Commit only micro-ops, don't kill anything else */
+                sendOutput(commit_tid, insts_out, output_index, true, false, branch);
+
+                if (isInbetweenInsts(commit_tid))
+                    setDrainState(commit_tid, DrainHaltFetch);
+
+                /* Discard any generated branch */
+                branch = BranchData::bubble();
+            } else if (commit_info.drainState == DrainAllInsts) {
+                /* Kill all instructions */
+                while (getInput(commit_tid))
+                    popInput(commit_tid);
+                sendOutput(commit_tid, insts_out, output_index, false, true, branch);
+            }
+        } else {
+            /* Commit micro-ops only if interrupted.  Otherwise, commit
+             *  anything you like */
+            DPRINTF(MinorExecute, "Committing micro-ops for interrupt[tid:%d]\n",
+                    commit_tid);
+            bool only_commit_microops = interrupted &&
+                                        hasInterrupt(commit_tid);
+            sendOutput(commit_tid, insts_out, output_index, only_commit_microops, false, branch);
+        }
+
+        /* Halt fetch, but don't do it until we have the current instruction in
+         *  the bag */
+        if (commit_info.drainState == DrainHaltFetch) {
+            updateBranchData(commit_tid, BranchData::HaltFetch,
+                             MinorDynInst::bubble(),
+                             cpu.getContext(commit_tid)->pcState(), branch);
+
+            cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
+            setDrainState(commit_tid, DrainAllInsts);
+        }
+    }
 }
 
 } // namespace minor

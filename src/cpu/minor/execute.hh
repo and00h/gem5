@@ -75,7 +75,7 @@ class Execute : public Named
     /** Input port carrying stream changes to Fetch1 */
     Latch<BranchData>::Input out;
 
-    Latch<ForwardInstData>::Input insts_out;
+    Latch<ForwardInstData>::Input out_insts;
 
     /** Pointer back to the containing CPU */
     MinorCPU &cpu;
@@ -331,7 +331,7 @@ class Execute : public Named
      *          (and so needs to be traced and accounted for)
      *      completed_mem_issue is set if the instruction was a
      *          memory access that was issued */
-    bool commitInst(MinorDynInstPtr inst, bool early_memory_issue,
+    bool commitInst(MinorDynInstPtr inst, ForwardInstData &insts_out, unsigned int *output_index, bool early_memory_issue,
         BranchData &branch, Fault &fault, bool &committed,
         bool &completed_mem_issue);
 
@@ -345,7 +345,8 @@ class Execute : public Named
     void commit(ThreadID thread_id, bool only_commit_microops, bool discard,
         BranchData &branch);
 
-    void sendOutput(ThreadID thread_id, bool only_commit_microops, bool discard,
+    void sendOutput(ThreadID thread_id, ForwardInstData &insts_out, unsigned int *output_index,
+                    bool only_commit_microops, bool discard,
         BranchData &branch);
 
     void packIntoOutput(
@@ -415,6 +416,12 @@ class Execute : public Named
     std::vector<Scoreboard>& getScoreboard() { return scoreboard; }
   /** Refactor methods */
   private:
+    // Execute::evaluate();
+    bool checkForIssuableInsts(std::vector<MinorDynInstPtr> &next_issuable_insts);
+    void advanceFunctionalUnits(std::vector<MinorDynInstPtr> &next_issuable_insts, bool &becoming_stalled, bool &can_issue_next);
+    bool headInstMightCommit(LSQ &lsq);
+    void attemptCommit(ThreadID commit_tid, ForwardInstData &insts_out, unsigned int *output_index, BranchData &branch, bool interrupted);
+
    // Execute::commit()
    /** Tries to commit memory responses (or discard them) */
     void tryToHandleMemResponses(ExecuteThreadInfo &ex_info, bool discard_inst,
