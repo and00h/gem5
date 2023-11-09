@@ -704,13 +704,15 @@ Writeback::isInbetweenInsts(ThreadID thread_id) const
 void
 Writeback::evaluate()
 {
-    if (!inp.outputWire->isBubble())
+    if (!inp.outputWire->isBubble()) {
+        DPRINTF(MinorWriteback, "Received an instruction\n");
         inputBuffer[inp.outputWire->threadId].setTail(*inp.outputWire);
+    }
     BranchData &branch = *out.inputWire;
 
     /* Check interrupts first.  Will halt commit if interrupt found */
     bool interrupted = false;
-    
+
     if (!branch.isBubble()) {
         /* It's important that this is here to carry Fetch1 wakeups to Fetch1
          *  without overwriting them */
@@ -718,9 +720,7 @@ Writeback::evaluate()
             " branch to complete\n");
     } else {
         ThreadID commit_tid = getCommittingThread();
-        DPRINTF(MinorWriteback, "Onesto\n");
         if (commit_tid != InvalidThreadID) {
-            DPRINTF(MinorWriteback, "E però dioporco\n");
             WritebackThreadInfo& commit_info = writebackInfo[commit_tid];
 
             DPRINTF(MinorWriteback, "Attempting to commit [tid:%d]\n",

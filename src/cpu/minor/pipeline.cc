@@ -73,7 +73,7 @@ Pipeline::Pipeline(MinorCPU &cpu_, const BaseMinorCPUParams &params) :
         params.decodeToExecuteForwardDelay),
     eToF1(cpu.name() + ".eToF1", "branch",
         params.executeBranchDelay),
-    eToW(cpu.name() + ".eToW", "insts", params.executeBranchDelay), // TODO change parameter
+    eToW(cpu.name() + ".eToW", "insts", params.decodeToExecuteForwardDelay), // TODO change parameter
     writeback(cpu.name() + ".writeback", cpu, params,
         eToW.output(), eToF1.input()),
     execute(cpu.name() + ".execute", cpu, params,
@@ -172,6 +172,7 @@ Pipeline::evaluate()
     dToF1.evaluate();
     dToE.evaluate();
     eToF1.evaluate();
+    eToW.evaluate();
 
     /* The activity recorder must be be called after all the stages and
      *  before the idler (which acts on the advice of the activity recorder */
@@ -237,8 +238,8 @@ Pipeline::drain()
     DPRINTF(MinorCPU, "Draining pipeline by halting inst fetches. "
         " Execution should drain naturally\n");
 
-    execute.drain();
     writeback.drain();
+    execute.drain();
 
     /* Make sure that needToSignalDrained isn't accidentally set if we
      *  are 'pre-drained' */
@@ -268,6 +269,7 @@ Pipeline::isDrained()
     //bool fetch2_drained = fetch2.isDrained();
     bool decode_drained = decode.isDrained();
     bool execute_drained = execute.isDrained();
+    bool writeback_drained = writeback.isDrained();
 
     //bool f1_to_f2_drained = f1ToF2.empty();
     //bool f2_to_f1_drained = f2ToF1.empty();
@@ -275,27 +277,29 @@ Pipeline::isDrained()
     bool f1_to_d_drained = f1ToD.empty();
     bool d_to_f1_drained = dToF1.empty();
     bool d_to_e_drained = dToE.empty();
-
+    bool e_to_w_drained = eToW.empty();
     /* bool ret = fetch1_drained && fetch2_drained &&
         decode_drained && execute_drained &&
         f1_to_f2_drained && f2_to_f1_drained &&
         f2_to_d_drained && d_to_e_drained; */
     bool ret = fetch1_drained &&
-        decode_drained && execute_drained &&
+        decode_drained && execute_drained && writeback_drained &&
         f1_to_d_drained && d_to_f1_drained
-        && d_to_e_drained;
+        && d_to_e_drained && e_to_w_drained;
 
     DPRINTF(MinorCPU, "Pipeline undrained stages state:%s%s%s%s%s%s%s%s\n",
         (fetch1_drained ? "" : " Fetch1"),
         //(fetch2_drained ? "" : " Fetch2"),
         (decode_drained ? "" : " Decode"),
         (execute_drained ? "" : " Execute"),
+        (writeback_drained ? "": "Writeback"),
         //(f1_to_f2_drained ? "" : " F1->F2"),
         //(f2_to_f1_drained ? "" : " F2->F1"),
         //(f2_to_d_drained ? "" : " F2->D"),
         (f1_to_d_drained ? "" : " F1->D"),
         (d_to_f1_drained ? "" : " D->F1"),
-        (d_to_e_drained ? "" : " D->E")
+        (d_to_e_drained ? "" : " D->E"),
+        (e_to_w_drained ? "" : " E->W")
         );
 
     return ret;
