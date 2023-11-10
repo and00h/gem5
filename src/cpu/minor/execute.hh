@@ -332,8 +332,7 @@ class Execute : public Named
      *      completed_mem_issue is set if the instruction was a
      *          memory access that was issued */
     bool commitInst(MinorDynInstPtr inst, ForwardInstData &insts_out, unsigned int *output_index, bool early_memory_issue,
-        BranchData &branch, Fault &fault, bool &committed,
-        bool &completed_mem_issue);
+        BranchData &branch, Fault &fault);
 
     /** Try and commit instructions from the ends of the functional unit
      *  pipelines.

@@ -642,6 +642,8 @@ Writeback::commit(ThreadID thread_id,
                 DPRINTF(MinorWriteback, "Committing no cost inst: %s", *inst);
 
                 completed_inst = true;
+            } else if (!completed_inst && inst->isMemRef()) {
+                DPRINTF(MinorWriteback, "Committing memory reference instruction: %s", *inst);
             }
 
             discard_inst = inst->id.streamSeqNum !=
@@ -649,7 +651,7 @@ Writeback::commit(ThreadID thread_id,
             
             /* Is this instruction discardable as its streamSeqNum
              *  doesn't match? */
-            if (!discard_inst) {
+            if (!discard_inst && !inst->isMemRef()) {
                 /* @todo Think about making lastMemBarrier be
                  *  MAX_UINT_64 to avoid using 0 as a marker value */
                 completed_inst = commitInst(inst, branch, fault,
@@ -679,12 +681,12 @@ Writeback::commit(ThreadID thread_id,
 
         if (completed_inst) {
             finalizeCompletedInstruction(thread_id, inst, wb_info, fault, committed_inst);
+            wb_info.inputIndex++;
         }
 
         /* Handle per-cycle instruction counting */
         if (committed_inst) {
             doCommitAccounting(inst, wb_info, num_insts_committed, num_mem_refs_committed, false);
-            wb_info.inputIndex++;
         }
 
         if (wb_info.inputIndex == insts_in->width()) {

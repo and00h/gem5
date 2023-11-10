@@ -72,7 +72,7 @@ class Writeback : public Named
     /** Input port carrying stream changes to Fetch1 */
     Latch<BranchData>::Input out;
 
-    /** Output port carrying instructions from Execute */
+    /** Output port carrying instructions from Memory */
     Latch<ForwardInstData>::Output inp;
 
     /** Pointer back to the containing CPU */

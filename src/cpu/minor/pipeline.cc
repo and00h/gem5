@@ -74,10 +74,13 @@ Pipeline::Pipeline(MinorCPU &cpu_, const BaseMinorCPUParams &params) :
     eToF1(cpu.name() + ".eToF1", "branch",
         params.executeBranchDelay),
     eToW(cpu.name() + ".eToW", "insts", params.decodeToExecuteForwardDelay), // TODO change parameter
+    eToM(cpu.name() + ".eToM", "insts", params.decodeToExecuteForwardDelay),
+    mToW(cpu.name() + ".mToW", "insts", params.decodeToExecuteForwardDelay),
     writeback(cpu.name() + ".writeback", cpu, params,
-        eToW.output(), eToF1.input()),
+        eToW.output(), eToF1.input()), //TODO change branch latch
+        mem(cpu.name()  ".memory", cpu, params, eToM.output(), mToW.input(), eToF1.input())
     execute(cpu.name() + ".execute", cpu, params,
-        dToE.output(), eToF1.input(), writeback.inputBuffer, eToW.input()),
+        dToE.output(), eToF1.input(), memory.inputBuffer, eToM.input()),
     lsq(cpu.name() + ".lsq", cpu.name() + ".dcache_port",
         cpu_, *this,
         params.executeMaxAccessesInMemory,
