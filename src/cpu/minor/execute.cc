@@ -1059,8 +1059,7 @@ void Execute::checkSuspension(ThreadID thread_id, MinorDynInstPtr inst, gem5::Th
 
 bool
 Execute::commitInst(MinorDynInstPtr inst, ForwardInstData &insts_out, unsigned int *output_index, bool early_memory_issue,
-    BranchData &branch, Fault &fault, bool &committed,
-    bool &completed_mem_issue)
+    BranchData &branch, Fault &fault)
 {
     ThreadID thread_id = inst->id.threadId;
     ThreadContext *thread = cpu.getContext(thread_id);
@@ -1085,65 +1084,15 @@ Execute::commitInst(MinorDynInstPtr inst, ForwardInstData &insts_out, unsigned i
         inst->fault->invoke(thread, NULL);
 
         tryToBranch(inst, fault, branch);
-    } else if (inst->staticInst->isMemRef()) {
-        /* Memory accesses are executed in two parts:
-         *  executeMemRefInst -- calculates the EA and issues the access
-         *      to memory.  This is done here.
-         *  handleMemResponse -- handles the response packet, done by
-         *      Execute::commit
-         *
-         *  While the memory access is in its FU, the EA is being
-         *  calculated.  At the end of the FU, when it is ready to
-         *  'commit' (in this function), the access is presented to the
-         *  memory queues.  When a response comes back from memory,
-         *  Execute::commit will commit it.
-         */
-        bool predicate_passed = false;
-        bool completed_mem_inst = executeMemRefInst(inst, branch,
-            predicate_passed, fault);
-
-        if (completed_mem_inst && fault != NoFault) {
-            if (early_memory_issue) {
-                DPRINTF(MinorExecute, "Fault in early executing inst: %s\n",
-                    fault->name());
-                /* Don't execute the fault, just stall the instruction
-                 *  until it gets to the head of inFlightInsts */
-                inst->canEarlyIssue = false;
-                /* Not completed as we'll come here again to pick up
-                 * the fault when we get to the end of the FU */
-                completed_inst = false;
-            } else {
-                DPRINTF(MinorExecute, "Fault in execute: %s\n",
-                    fault->name());
-                fault->invoke(thread, NULL);
-
-                tryToBranch(inst, fault, branch);
-                completed_inst = true;
-            }
-        } else {
-            completed_inst = completed_mem_inst;
-        }
-        completed_mem_issue = completed_inst;
-    } else if (inst->isInst() && inst->staticInst->isFullMemBarrier() &&
-        !cpu.getLSQ().canPushIntoStoreBuffer())
-    {
-        DPRINTF(MinorExecute, "Can't commit data barrier inst: %s yet as"
-            " there isn't space in the store buffer\n", *inst);
-
-        completed_inst = false;
     } else if (inst->isInst() && inst->staticInst->isQuiesce()
             && !branch.isBubble()){
         /* This instruction can suspend, need to be able to communicate
          * backwards, so no other branches may evaluate this cycle*/
         completed_inst = false;
     } else {
-        // MOVETO: WRITEBACK
-        DPRINTF(MinorExecute, "Sending inst to writeback: %s\n", *inst);
+        DPRINTF(MinorExecute, "Sending inst to memory: %s\n", *inst);
 
         packIntoOutput(inst, insts_out, output_index);
-        //actuallyExecuteInst(thread_id, inst, fault, thread, committed);
-
-        //doInstCommitAccounting(inst);
         tryToBranch(inst, fault, branch);
     }
 
@@ -1604,6 +1553,7 @@ Execute::commit(ThreadID thread_id,
                 
                 /* Is this instruction discardable as its streamSeqNum
                  *  doesn't match? */
+
                 if (!discard_inst) {
                     /* Try to commit or discard a non-memory instruction.
                      *  Memory ops are actually 'committed' from this FUs
@@ -1846,32 +1796,32 @@ Execute::sendOutput(ThreadID thread_id, ForwardInstData &insts_out, unsigned int
              *  For any other case, leave it to the normal instruction
              *  issue below to handle them.
              */
-            if (!ex_info.inFUMemInsts->empty() && lsq.canRequest()) {
-                DPRINTF(MinorExecute, "Trying to commit from mem FUs\n");
-
-                const MinorDynInstPtr head_mem_ref_inst =
-                    ex_info.inFUMemInsts->front().inst;
-                FUPipeline *fu = funcUnits[head_mem_ref_inst->fuIndex];
-                const MinorDynInstPtr &fu_inst = fu->front().inst;
-
-                /* Use this, possibly out of order, inst as the one
-                 *  to 'commit'/send to the LSQ */
-                if (!fu_inst->isBubble() &&
-                    !fu_inst->inLSQ &&
-                    fu_inst->canEarlyIssue &&
-                    ex_info.streamSeqNum == fu_inst->id.streamSeqNum &&
-                    head_exec_seq_num > fu_inst->instToWaitFor)
-                {
-                    DPRINTF(MinorExecute, "Issuing mem ref early"
-                        " inst: %s instToWaitFor: %d\n",
-                        *(fu_inst), fu_inst->instToWaitFor);
-
-                    inst = fu_inst;
-                    try_to_commit = true;
-                    early_memory_issue = true;
-                    completed_inst = true;
-                }
-            }
+//            if (!ex_info.inFUMemInsts->empty() && lsq.canRequest()) {
+//                DPRINTF(MinorExecute, "Trying to commit from mem FUs\n");
+//
+//                const MinorDynInstPtr head_mem_ref_inst =
+//                    ex_info.inFUMemInsts->front().inst;
+//                FUPipeline *fu = funcUnits[head_mem_ref_inst->fuIndex];
+//                const MinorDynInstPtr &fu_inst = fu->front().inst;
+//
+//                /* Use this, possibly out of order, inst as the one
+//                 *  to 'commit'/send to the LSQ */
+//                if (!fu_inst->isBubble() &&
+//                    !fu_inst->inLSQ &&
+//                    fu_inst->canEarlyIssue &&
+//                    ex_info.streamSeqNum == fu_inst->id.streamSeqNum &&
+//                    head_exec_seq_num > fu_inst->instToWaitFor)
+//                {
+//                    DPRINTF(MinorExecute, "Issuing mem ref early"
+//                        " inst: %s instToWaitFor: %d\n",
+//                        *(fu_inst), fu_inst->instToWaitFor);
+//
+//                    inst = fu_inst;
+//                    try_to_commit = true;
+//                    early_memory_issue = true;
+//                    completed_inst = true;
+//                }
+//            }
 
             /* Try and commit FU-less insts */
             if (!completed_inst && inst->isNoCostInst()) {

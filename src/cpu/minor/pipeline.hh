@@ -89,8 +89,11 @@ class Pipeline : public Ticked
     Latch<BranchData> eToF1;
 
     Latch<ForwardInstData> eToW;
+    Latch<ForwardInstData> eToM;
+    Latch<ForwardInstData> mToW;
 
     Writeback writeback;
+    Memory mem;
     Execute execute;
     Decode decode;
     //Fetch2 fetch2;
@@ -110,7 +113,7 @@ class Pipeline : public Ticked
         /* A stage representing wakeup of the whole processor */
         CPUStageId = 0,
         /* Real pipeline stages */
-        Fetch1StageId, Fetch2StageId, DecodeStageId, ExecuteStageId, WritebackStageId,
+        Fetch1StageId, Fetch2StageId, DecodeStageId, ExecuteStageId, MemoryStageId, WritebackStageId,
         Num_StageId /* Stage count */
     };
 
