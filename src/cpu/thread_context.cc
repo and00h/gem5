@@ -67,7 +67,9 @@ ThreadContext::compare(ThreadContext *one, ThreadContext *two)
     for (auto &id: *regClasses.at(IntRegClass)) {
         RegVal t1 = one->getReg(id);
         RegVal t2 = two->getReg(id);
-        if (t1 != t2)
+        RegVal t1f = one->getFwdReg(id);
+        RegVal t2f = two->getFwdReg(id);
+        if (t1 != t2 || t1f != t2f)
             panic("Int reg idx %d doesn't match, one: %#x, two: %#x",
                   id.index(), t1, t2);
     }
@@ -76,7 +78,9 @@ ThreadContext::compare(ThreadContext *one, ThreadContext *two)
     for (auto &id: *regClasses.at(FloatRegClass)) {
         RegVal t1 = one->getReg(id);
         RegVal t2 = two->getReg(id);
-        if (t1 != t2)
+        RegVal t1f = one->getFwdReg(id);
+        RegVal t2f = two->getFwdReg(id);
+        if (t1 != t2 || t1f != t2f)
             panic("Float reg idx %d doesn't match, one: %#x, two: %#x",
                   id.index(), t1, t2);
     }
@@ -85,10 +89,15 @@ ThreadContext::compare(ThreadContext *one, ThreadContext *two)
     const auto *vec_class = regClasses.at(VecRegClass);
     std::vector<uint8_t> vec1(vec_class->regBytes());
     std::vector<uint8_t> vec2(vec_class->regBytes());
+    std::vector<uint8_t> vec1f(vec_class->regBytes());
+    std::vector<uint8_t> vec2f(vec_class->regBytes());
     for (auto &id: *regClasses.at(VecRegClass)) {
         one->getReg(id, vec1.data());
         two->getReg(id, vec2.data());
-        if (vec1 != vec2) {
+        one->getFwdReg(id, vec1f.data());
+        two->getFwdReg(id, vec2f.data());
+
+        if (vec1 != vec2 || vec1f != vec2f) {
             panic("Vec reg idx %d doesn't match, one: %#x, two: %#x",
                   id.index(), vec_class->valString(vec1.data()),
                   vec_class->valString(vec2.data()));
@@ -99,10 +108,15 @@ ThreadContext::compare(ThreadContext *one, ThreadContext *two)
     const auto *vec_pred_class = regClasses.at(VecPredRegClass);
     std::vector<uint8_t> pred1(vec_pred_class->regBytes());
     std::vector<uint8_t> pred2(vec_pred_class->regBytes());
+    std::vector<uint8_t> pred1f(vec_pred_class->regBytes());
+    std::vector<uint8_t> pred2f(vec_pred_class->regBytes());
+
     for (auto &id: *regClasses.at(VecPredRegClass)) {
         one->getReg(id, pred1.data());
         two->getReg(id, pred2.data());
-        if (pred1 != pred2) {
+        one->getFwdReg(id, pred1f.data());
+        two->getFwdReg(id, pred2f.data());
+        if (pred1 != pred2 || pred1f != pred2f) {
             panic("Pred reg idx %d doesn't match, one: %s, two: %s",
                   id.index(), vec_pred_class->valString(pred1.data()),
                   vec_pred_class->valString(pred2.data()));
@@ -121,7 +135,9 @@ ThreadContext::compare(ThreadContext *one, ThreadContext *two)
     for (auto &id: *regClasses.at(CCRegClass)) {
         RegVal t1 = one->getReg(id);
         RegVal t2 = two->getReg(id);
-        if (t1 != t2)
+        RegVal t1f = one->getFwdReg(id);
+        RegVal t2f = two->getFwdReg(id);
+        if (t1 != t2 || t1f != t2f)
             panic("CC reg idx %d doesn't match, one: %#x, two: %#x",
                   id.index(), t1, t2);
     }
@@ -175,6 +191,19 @@ ThreadContext::setReg(const RegId &reg, RegVal val)
 {
     setReg(reg, &val);
 }
+
+RegVal
+ThreadContext::getFwdReg(const RegId &reg) const
+{
+    return getReg(reg);
+}
+
+void
+ThreadContext::setFwdReg(const RegId &reg, RegVal val)
+{
+    setReg(reg, &val);
+}
+
 
 void
 serialize(const ThreadContext &tc, CheckpointOut &cp)

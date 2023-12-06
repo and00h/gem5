@@ -96,7 +96,7 @@ class SimpleThread : public ThreadState, public ThreadContext
 
   protected:
     std::array<RegFile, CCRegClass + 1> regFiles;
-
+    std::array<RegFile, CCRegClass + 1> fwdRegFiles;
     BaseISA *const isa;    // one "instance" of the current ISA.
 
     std::unique_ptr<PCStateBase> _pcState;
@@ -246,6 +246,8 @@ class SimpleThread : public ThreadState, public ThreadContext
         set(_pcState, isa->newPCState());
         for (auto &rf: regFiles)
             rf.clear();
+        for (auto &rf: fwdRegFiles)
+            rf.clear();
         isa->clear();
     }
 
@@ -307,10 +309,10 @@ class SimpleThread : public ThreadState, public ThreadContext
     {
         storeCondFailures = sc_failures;
     }
+protected:
+    using RegFileArray = std::array<gem5::RegFile, CCRegClass + 1>;
 
-    RegVal
-    getReg(const RegId &arch_reg) const override
-    {
+    RegVal get_reg(const RegId &arch_reg, const RegFileArray &regFiles) const {
         const RegId reg = arch_reg.flatten(*isa);
 
         const RegIndex idx = reg.index();
@@ -324,9 +326,7 @@ class SimpleThread : public ThreadState, public ThreadContext
         return val;
     }
 
-    void
-    getReg(const RegId &arch_reg, void *val) const override
-    {
+    void get_reg(const RegId &arch_reg, void *val, const RegFileArray &regFiles) const {
         const RegId reg = arch_reg.flatten(*isa);
 
         const RegIndex idx = reg.index();
@@ -341,7 +341,7 @@ class SimpleThread : public ThreadState, public ThreadContext
     }
 
     void *
-    getWritableReg(const RegId &arch_reg) override
+    get_writable_reg(const RegId &arch_reg, RegFileArray &regFiles)
     {
         const RegId reg = arch_reg.flatten(*isa);
         const RegIndex idx = reg.index();
@@ -351,7 +351,7 @@ class SimpleThread : public ThreadState, public ThreadContext
     }
 
     void
-    setReg(const RegId &arch_reg, RegVal val) override
+    set_reg(const RegId &arch_reg, RegVal val, RegFileArray &regFiles)
     {
         const RegId reg = arch_reg.flatten(*isa);
 
@@ -369,7 +369,7 @@ class SimpleThread : public ThreadState, public ThreadContext
     }
 
     void
-    setReg(const RegId &arch_reg, const void *val) override
+    set_reg(const RegId &arch_reg, const void *val, RegFileArray &regFiles)
     {
         const RegId reg = arch_reg.flatten(*isa);
 
@@ -382,6 +382,169 @@ class SimpleThread : public ThreadState, public ThreadContext
                 reg.className(), reg_class.regName(arch_reg), idx,
                 reg_class.valString(val));
         reg_file.set(idx, val);
+    }
+public:
+
+    RegVal
+    getReg(const RegId &arch_reg) const override
+    {
+        return get_reg(arch_reg, regFiles);
+        // const RegId reg = arch_reg.flatten(*isa);
+
+        // const RegIndex idx = reg.index();
+
+        // const auto &reg_file = regFiles[reg.classValue()];
+        // const auto &reg_class = reg_file.regClass;
+
+        // RegVal val = reg_file.reg(idx);
+        // DPRINTFV(reg_class.debug(), "Reading %s reg %s (%d) as %#x.\n",
+        //         reg.className(), reg_class.regName(arch_reg), idx, val);
+        // return val;
+    }
+
+    RegVal
+    getFwdReg(const RegId &arch_reg) const override
+    {
+        return get_reg(arch_reg, fwdRegFiles);
+        // const RegId reg = arch_reg.flatten(*isa);
+
+        // const RegIndex idx = reg.index();
+
+        // const auto &reg_file = fwdRegFiles[reg.classValue()];
+        // const auto &reg_class = reg_file.regClass;
+
+        // RegVal val = reg_file.reg(idx);
+        // DPRINTFV(reg_class.debug(), "Reading %s reg %s (%d) as %#x.\n",
+        //         reg.className(), reg_class.regName(arch_reg), idx, val);
+        // return val;
+    }
+
+    void
+    getReg(const RegId &arch_reg, void *val) const override
+    {
+        get_reg(arch_reg, val, regFiles);
+        // const RegId reg = arch_reg.flatten(*isa);
+
+        // const RegIndex idx = reg.index();
+
+        // const auto &reg_file = regFiles[reg.classValue()];
+        // const auto &reg_class = reg_file.regClass;
+
+        // reg_file.get(idx, val);
+        // DPRINTFV(reg_class.debug(), "Reading %s register %s (%d) as %s.\n",
+        //         reg.className(), reg_class.regName(arch_reg), idx,
+        //         reg_class.valString(val));
+    }
+
+    void
+    getFwdReg(const RegId &arch_reg, void *val) const override
+    {
+        get_reg(arch_reg, val, fwdRegFiles);
+        // const RegId reg = arch_reg.flatten(*isa);
+
+        // const RegIndex idx = reg.index();
+
+        // const auto &reg_file = regFiles[reg.classValue()];
+        // const auto &reg_class = reg_file.regClass;
+
+        // reg_file.get(idx, val);
+        // DPRINTFV(reg_class.debug(), "Reading %s register %s (%d) as %s.\n",
+        //         reg.className(), reg_class.regName(arch_reg), idx,
+        //         reg_class.valString(val));
+    }
+
+    void *
+    getWritableReg(const RegId &arch_reg) override
+    {
+        return get_writable_reg(arch_reg, regFiles);
+        // const RegId reg = arch_reg.flatten(*isa);
+        // const RegIndex idx = reg.index();
+        // auto &reg_file = regFiles[reg.classValue()];
+
+        // return reg_file.ptr(idx);
+    }
+
+    void *
+    getFwdWritableReg(const RegId &arch_reg) override
+    {
+        return get_writable_reg(arch_reg, fwdRegFiles);
+        // const RegId reg = arch_reg.flatten(*isa);
+        // const RegIndex idx = reg.index();
+        // auto &reg_file = regFiles[reg.classValue()];
+
+        // return reg_file.ptr(idx);
+    }
+
+    void
+    setReg(const RegId &arch_reg, RegVal val) override
+    {
+        set_reg(arch_reg, val, regFiles);
+        // const RegId reg = arch_reg.flatten(*isa);
+
+        // if (reg.is(InvalidRegClass))
+        //     return;
+
+        // const RegIndex idx = reg.index();
+
+        // auto &reg_file = regFiles[reg.classValue()];
+        // const auto &reg_class = reg_file.regClass;
+
+        // DPRINTFV(reg_class.debug(), "Setting %s register %s (%d) to %#x.\n",
+        //         reg.className(), reg_class.regName(arch_reg), idx, val);
+        // reg_file.reg(idx) = val;
+    }
+
+    void
+    setFwdReg(const RegId &arch_reg, RegVal val) override
+    {
+        set_reg(arch_reg, val, fwdRegFiles);
+        // const RegId reg = arch_reg.flatten(*isa);
+
+        // if (reg.is(InvalidRegClass))
+        //     return;
+
+        // const RegIndex idx = reg.index();
+
+        // auto &reg_file = fwdRegFiles[reg.classValue()];
+        // const auto &reg_class = reg_file.regClass;
+
+        // DPRINTFV(reg_class.debug(), "Setting %s register %s (%d) to %#x.\n",
+        //         reg.className(), reg_class.regName(arch_reg), idx, val);
+        // reg_file.reg(idx) = val;
+    }
+
+    void
+    setReg(const RegId &arch_reg, const void *val) override
+    {
+        set_reg(arch_reg, val, regFiles);
+        // const RegId reg = arch_reg.flatten(*isa);
+
+        // const RegIndex idx = reg.index();
+
+        // auto &reg_file = regFiles[reg.classValue()];
+        // const auto &reg_class = reg_file.regClass;
+
+        // DPRINTFV(reg_class.debug(), "Setting %s register %s (%d) to %s.\n",
+        //         reg.className(), reg_class.regName(arch_reg), idx,
+        //         reg_class.valString(val));
+        // reg_file.set(idx, val);
+    }
+
+    void
+    setFwdReg(const RegId &arch_reg, const void *val) override
+    {
+        set_reg(arch_reg, val, fwdRegFiles);
+        // const RegId reg = arch_reg.flatten(*isa);
+
+        // const RegIndex idx = reg.index();
+
+        // auto &reg_file = regFiles[reg.classValue()];
+        // const auto &reg_class = reg_file.regClass;
+
+        // DPRINTFV(reg_class.debug(), "Setting %s register %s (%d) to %s.\n",
+        //         reg.className(), reg_class.regName(arch_reg), idx,
+        //         reg_class.valString(val));
+        // reg_file.set(idx, val);
     }
 
     // hardware transactional memory

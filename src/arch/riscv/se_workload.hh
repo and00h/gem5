@@ -79,9 +79,11 @@ struct Result<RiscvISA::SEWorkload::SyscallABI, SyscallReturn>
         if (ret.successful()) {
             // no error
             tc->setReg(RiscvISA::ReturnValueReg, ret.returnValue());
+            tc->setFwdReg(RiscvISA::ReturnValueReg, ret.returnValue());
         } else {
             // got an error, return details
             tc->setReg(RiscvISA::ReturnValueReg, ret.encodedValue());
+            tc->setFwdReg(RiscvISA::ReturnValueReg, ret.encodedValue());
         }
     }
 };

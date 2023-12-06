@@ -73,14 +73,15 @@ Pipeline::Pipeline(MinorCPU &cpu_, const BaseMinorCPUParams &params) :
         params.decodeToExecuteForwardDelay),
     eToF1(cpu.name() + ".eToF1", "branch",
         params.executeBranchDelay),
-    eToW(cpu.name() + ".eToW", "insts", params.decodeToExecuteForwardDelay), // TODO change parameter
+    eToW(cpu.name() + ".eToW", "insts", params.decodeToExecuteForwardDelay),
+    eToW_branch(cpu.name() + ".eToW_branch", "branch", params.decodeToExecuteForwardDelay),
     eToM(cpu.name() + ".eToM", "insts", params.decodeToExecuteForwardDelay),
     mToW(cpu.name() + ".mToW", "insts", params.decodeToExecuteForwardDelay),
     writeback(cpu.name() + ".writeback", cpu, params,
-        eToW.output(), eToF1.input()), //TODO change branch latch
-        mem(cpu.name()  ".memory", cpu, params, eToM.output(), mToW.input(), eToF1.input())
+        eToW.output(), eToF1.input(), eToW_branch.output()), //TODO change branch latch
+//    mem(cpu.name() + ".memory", cpu, params, eToM.output(), mToW.input(), eToF1.input()),
     execute(cpu.name() + ".execute", cpu, params,
-        dToE.output(), eToF1.input(), memory.inputBuffer, eToM.input()),
+        dToE.output(), eToF1.input(), eToW_branch.input(), writeback.inputBuffer, eToW.input()),
     lsq(cpu.name() + ".lsq", cpu.name() + ".dcache_port",
         cpu_, *this,
         params.executeMaxAccessesInMemory,
@@ -146,6 +147,7 @@ Pipeline::minorTrace() const
     eToF1.minorTrace();
     writeback.minorTrace();
     eToW.minorTrace();
+    eToW_branch.minorTrace();
     activityRecorder.minorTrace();
 }
 
@@ -176,6 +178,8 @@ Pipeline::evaluate()
     dToE.evaluate();
     eToF1.evaluate();
     eToW.evaluate();
+    eToW_branch.evaluate();
+
 
     /* The activity recorder must be be called after all the stages and
      *  before the idler (which acts on the advice of the activity recorder */

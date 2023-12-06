@@ -149,19 +149,40 @@ class ExecContext : public gem5::ExecContext
         const RegId &reg = si->srcRegIdx(idx);
         if (reg.is(InvalidRegClass))
             return 0;
-        return thread.getReg(reg);
+        return thread.getFwdReg(reg);
+    }
+
+    RegVal
+    getFwdRegOperand(const StaticInst *si, int idx) override
+    {
+        const RegId &reg = si->srcRegIdx(idx);
+        if (reg.is(InvalidRegClass))
+            return 0;
+        return thread.getFwdReg(reg);
     }
 
     void
     getRegOperand(const StaticInst *si, int idx, void *val) override
     {
-        thread.getReg(si->srcRegIdx(idx), val);
+        thread.getFwdReg(si->srcRegIdx(idx), val);
+    }
+
+    void
+    getFwdRegOperand(const StaticInst *si, int idx, void *val) override
+    {
+        thread.getFwdReg(si->srcRegIdx(idx), val);
     }
 
     void *
     getWritableRegOperand(const StaticInst *si, int idx) override
     {
-        return thread.getWritableReg(si->destRegIdx(idx));
+        return thread.getFwdWritableReg(si->destRegIdx(idx));
+    }
+
+    void *
+    getFwdWritableRegOperand(const StaticInst *si, int idx) override
+    {
+        return thread.getFwdWritableReg(si->destRegIdx(idx));
     }
 
     void
@@ -170,13 +191,38 @@ class ExecContext : public gem5::ExecContext
         const RegId &reg = si->destRegIdx(idx);
         if (reg.is(InvalidRegClass))
             return;
-        thread.setReg(si->destRegIdx(idx), val);
+        thread.setFwdReg(si->destRegIdx(idx), val);
+    }
+
+    void
+    setFwdRegOperand(const StaticInst *si, int idx, RegVal val) override
+    {
+        const RegId &reg = si->destRegIdx(idx);
+        if (reg.is(InvalidRegClass))
+            return;
+        thread.setFwdReg(si->destRegIdx(idx), val);
     }
 
     void
     setRegOperand(const StaticInst *si, int idx, const void *val) override
     {
-        thread.setReg(si->destRegIdx(idx), val);
+        thread.setFwdReg(si->destRegIdx(idx), val);
+    }
+
+    void
+    setFwdRegOperand(const StaticInst *si, int idx, const void *val) override
+    {
+        thread.setFwdReg(si->destRegIdx(idx), val);
+    }
+
+    void writeback(const StaticInstPtr si)
+    {
+        for (int i = 0; i < si->numDestRegs(); ++i) {
+            const RegId &reg = si->destRegIdx(i);
+            if (reg.is(InvalidRegClass))
+                continue;
+            thread.setReg(reg, thread.getFwdReg(reg));
+        }
     }
 
     bool

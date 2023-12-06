@@ -65,10 +65,12 @@ Writeback::Writeback(const std::string &name_,
     MinorCPU &cpu_,
     const BaseMinorCPUParams &params,
     Latch<ForwardInstData>::Output inp_,
-    Latch<BranchData>::Input out_) :
+    Latch<BranchData>::Input out_,
+    Latch<BranchData>::Output execute_branch_) :
     Named(name_),
     inp(inp_),
     out(out_),
+    execute_branch(execute_branch_),
     cpu(cpu_),
     commitLimit(1),
     memoryCommitLimit(params.executeMemoryCommitLimit),
@@ -128,6 +130,7 @@ Writeback::getInput(ThreadID tid)
 void
 Writeback::popInput(ThreadID tid)
 {
+    DPRINTF(MinorWriteback, "Popping inputBuffer[%d]\n", tid);
     if (!inputBuffer[tid].empty())
         inputBuffer[tid].pop();
 
@@ -210,7 +213,7 @@ Writeback::tryToBranch(MinorDynInstPtr inst, Fault fault, BranchData &branch)
         reason = BranchData::NoBranch;
     }
 
-    updateBranchData(inst->id.threadId, reason, inst, *target, branch);
+    //updateBranchData(inst->id.threadId, reason, inst, *target, branch);
 }
 
 void
@@ -356,31 +359,34 @@ Writeback::doInstCommitAccounting(MinorDynInstPtr inst)
 }
 
 void Writeback::actuallyExecuteInst(ThreadID thread_id, MinorDynInstPtr inst, Fault &fault, gem5::ThreadContext *thread, bool &committed) {
-    ExecContext context(cpu, *cpu.threads[thread_id], inst);
+    if (!inst->executed && !inst->committed) {
+        ExecContext context(cpu, *cpu.threads[thread_id], inst);
+        context.writeback(inst->staticInst);
+    //     fault = inst->staticInst->execute(&context, inst->traceData);
 
-    fault = inst->staticInst->execute(&context,
-        inst->traceData);
+    // /* Set the predicate for tracing and dump */
+    //     if (inst->traceData)
+    //         inst->traceData->setPredicate(context.readPredicate());
 
-    /* Set the predicate for tracing and dump */
-    if (inst->traceData)
-        inst->traceData->setPredicate(context.readPredicate());
+    //     if (fault != NoFault) {
+    //         if (inst->traceData) {
+    //             if (debug::ExecFaulting) {
+    //                 inst->traceData->setFaulting(true);
+    //             } else {
+    //                 delete inst->traceData;
+    //                 inst->traceData = NULL;
+    //             }
+    //         }
 
-    committed = true;
-
-    if (fault != NoFault) {
-        if (inst->traceData) {
-            if (debug::ExecFaulting) {
-                inst->traceData->setFaulting(true);
-            } else {
-                delete inst->traceData;
-                inst->traceData = NULL;
-            }
-        }
-
-        DPRINTF(MinorWriteback, "Fault in execute of inst: %s fault: %s\n",
-            *inst, fault->name());
-        fault->invoke(thread, inst->staticInst);
+    //         DPRINTF(MinorWriteback, "Fault in execute of inst: %s fault: %s\n",
+    //             *inst, fault->name());
+    //         fault->invoke(thread, inst->staticInst);
+    //     }
+    } else {
+        DPRINTF(MinorWriteback, "Not executing control inst, it should have been already executed: %s\n", *inst);
     }
+    
+    committed = true;
 }
 
 void Writeback::checkSuspension(ThreadID thread_id, MinorDynInstPtr inst, gem5::ThreadContext *thread, BranchData &branch) {
@@ -430,14 +436,14 @@ Writeback::commitInst(MinorDynInstPtr inst,
         fault = inst->fault;
         inst->fault->invoke(thread, NULL);
 
-        tryToBranch(inst, fault, branch);
+        //tryToBranch(inst, fault, branch);
     } else {
         DPRINTF(MinorWriteback, "Committing inst: %s\n", *inst);
 
         actuallyExecuteInst(thread_id, inst, fault, thread, committed);
 
         doInstCommitAccounting(inst);
-        tryToBranch(inst, fault, branch);
+        //tryToBranch(inst, fault, branch);
     }
 
     if (completed_inst) {
@@ -527,14 +533,6 @@ Writeback::finalizeCompletedInstruction(ThreadID thread_id, const MinorDynInstPt
          *  clear its dependencies */
         popInput(thread_id);
 
-        /* Complete barriers in the LSQ/move to store buffer */
-        if (inst->isInst() && inst->staticInst->isFullMemBarrier()) {
-            DPRINTF(MinorMem, "Completing memory barrier"
-                " inst: %s committed: %d\n", *inst, committed_inst);
-            cpu.getLSQ().completeMemBarrierInst(inst, committed_inst);
-        }
-
-        cpu.getScoreboard()[thread_id].clearInstDests(inst, inst->isMemRef());
     }
 }
 
@@ -646,8 +644,7 @@ Writeback::commit(ThreadID thread_id,
                 DPRINTF(MinorWriteback, "Committing memory reference instruction: %s", *inst);
             }
 
-            discard_inst = inst->id.streamSeqNum !=
-                wb_info.streamSeqNum || discard;
+            discard_inst = /* inst->id.streamSeqNum != wb_info.streamSeqNum || */ discard;
             
             /* Is this instruction discardable as its streamSeqNum
              *  doesn't match? */
@@ -704,6 +701,44 @@ Writeback::isInbetweenInsts(ThreadID thread_id) const
 }
 
 void
+Writeback::changeStream(const BranchData &branch)
+{
+    WritebackThreadInfo &thread = writebackInfo[branch.threadId];
+
+    updateExpectedSeqNums(branch);
+
+    /* Start fetching again if we were stopped */
+    DPRINTF(MinorWriteback, "Changing stream on branch: %s\n", branch);
+}
+
+void
+Writeback::updateExpectedSeqNums(const BranchData &branch)
+{
+    WritebackThreadInfo &thread = writebackInfo[branch.threadId];
+
+    DPRINTF(MinorWriteback, "Updating streamSeqNum from: %d to %d,",
+        thread.streamSeqNum, branch.newStreamSeqNum);
+
+    /* Change the stream */
+    thread.streamSeqNum = branch.newStreamSeqNum;
+}
+
+void
+Writeback::processBranchesFromLaterStages(const BranchData &branch_in)
+{
+    bool execute_thread_valid = branch_in.threadId != InvalidThreadID;
+
+    /** Are both branches from later stages valid and for the same thread? */
+    if (execute_thread_valid) {
+        /* Are we changing stream?  Look to the Execute branches first, then
+         * to predicted changes of stream from Fetch2 */
+        if (branch_in.isStreamChange()) {
+            changeStream(branch_in);
+        }
+    }
+}
+
+void
 Writeback::evaluate()
 {
     if (!inp.outputWire->isBubble()) {
@@ -711,6 +746,9 @@ Writeback::evaluate()
         inputBuffer[inp.outputWire->threadId].setTail(*inp.outputWire);
     }
     BranchData &branch = *out.inputWire;
+    const BranchData &branch_in = *execute_branch.outputWire;
+
+    processBranchesFromLaterStages(branch_in);
 
     /* Check interrupts first.  Will halt commit if interrupt found */
     bool interrupted = false;
@@ -757,14 +795,14 @@ Writeback::evaluate()
 
             /* Halt fetch, but don't do it until we have the current instruction in
              *  the bag */
-            if (commit_info.drainState == DrainHaltFetch) {
-                updateBranchData(commit_tid, BranchData::HaltFetch,
-                        MinorDynInst::bubble(),
-                        cpu.getContext(commit_tid)->pcState(), branch);
+            // if (commit_info.drainState == DrainHaltFetch) {
+            //     updateBranchData(commit_tid, BranchData::HaltFetch,
+            //             MinorDynInst::bubble(),
+            //             cpu.getContext(commit_tid)->pcState(), branch);
 
-                cpu.wakeupOnEvent(Pipeline::WritebackStageId);
-                setDrainState(commit_tid, DrainAllInsts);
-            }
+            //     cpu.wakeupOnEvent(Pipeline::WritebackStageId);
+            //     setDrainState(commit_tid, DrainAllInsts);
+            // }
         }
     }
 

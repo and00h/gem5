@@ -177,11 +177,12 @@ Export('MakeAction')
 main = Environment(tools=[
         'default', 'git', TempFileSpawn, EnvDefaults, MakeActionTool,
         ConfigFile, AddLocalRPATH, SwitchingHeaders, TagImpliesTool, Blob
-    ])
+    ], COMPILATIONDB_USE_ABSPATH=True)
 
 main.Tool(SCons.Tool.FindTool(['gcc', 'clang'], main))
 main.Tool(SCons.Tool.FindTool(['g++', 'clang++'], main))
-
+main.Tool('compilation_db')
+main.CompilationDatabase()
 Export('main')
 
 from gem5_scons.util import get_termcap
@@ -535,6 +536,8 @@ for variant_path in variant_paths:
         gem5py_env = env.Clone()
         config_embedded_python(gem5py_env)
 
+    gem5py_env.Tool('compilation_db')
+    gem5py_env.CompilationDatabase()
     # Bare minimum environment that only includes python
     gem5py_env.Append(CCFLAGS=['${GEM5PY_CCFLAGS_EXTRA}'])
     gem5py_env.Append(LINKFLAGS=['${GEM5PY_LINKFLAGS_EXTRA}'])

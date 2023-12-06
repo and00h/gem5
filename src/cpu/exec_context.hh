@@ -79,6 +79,15 @@ class ExecContext
     virtual void setRegOperand(const StaticInst *si, int idx,
             const void *val) = 0;
 
+    virtual RegVal getFwdRegOperand(const StaticInst *si, int idx) {
+        return getRegOperand(si, idx);
+    }
+    virtual void getFwdRegOperand(const StaticInst *si, int idx, void *val) { getRegOperand(si, idx, val); }
+    virtual void *getFwdWritableRegOperand(const StaticInst *si, int idx) { return getWritableRegOperand(si, idx); }
+    virtual void setFwdRegOperand(const StaticInst *si, int idx, RegVal val) { setRegOperand(si, idx, val); }
+    virtual void setFwdRegOperand(const StaticInst *si, int idx,
+            const void *val) { setRegOperand(si, idx, val); }
+
     /**
      * @{
      * @name Misc Register Interfaces

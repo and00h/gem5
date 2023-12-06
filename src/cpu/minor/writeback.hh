@@ -71,6 +71,7 @@ class Writeback : public Named
 
     /** Input port carrying stream changes to Fetch1 */
     Latch<BranchData>::Input out;
+    Latch<BranchData>::Output execute_branch;
 
     /** Output port carrying instructions from Memory */
     Latch<ForwardInstData>::Output inp;
@@ -178,7 +179,10 @@ class Writeback : public Named
 
     /** Pop an element off the input buffer, if there are any */
     void popInput(ThreadID tid);
+    void changeStream(const BranchData &branch);
+    void updateExpectedSeqNums(const BranchData &branch);
 
+    void processBranchesFromLaterStages(const BranchData &execute_branch);
     /** Generate Branch data based (into branch) on an observed (or not)
      *  change in PC while executing an instruction.
      *  Also handles branch prediction information within the inst. */
@@ -255,7 +259,8 @@ class Writeback : public Named
         MinorCPU &cpu_,
         const BaseMinorCPUParams &params,
         Latch<ForwardInstData>::Output inp_,
-        Latch<BranchData>::Input out_);
+        Latch<BranchData>::Input out_,
+        Latch<BranchData>::Output execute_branch_);
 
     ~Writeback();
 

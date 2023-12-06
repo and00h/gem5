@@ -95,6 +95,7 @@ class TimingExpr : public SimObject
     { }
 
     virtual uint64_t eval(TimingExprEvalContext &context) = 0;
+    virtual uint64_t evalFwd(TimingExprEvalContext &context) = 0;
 };
 
 class TimingExprLiteral : public TimingExpr
@@ -108,6 +109,7 @@ class TimingExprLiteral : public TimingExpr
     { }
 
     uint64_t eval(TimingExprEvalContext &context) { return value; }
+    uint64_t evalFwd(TimingExprEvalContext &context) { return value; }
 };
 
 class TimingExprSrcReg : public TimingExpr
@@ -121,6 +123,7 @@ class TimingExprSrcReg : public TimingExpr
     { }
 
     uint64_t eval(TimingExprEvalContext &context);
+    uint64_t evalFwd(TimingExprEvalContext &context);
 };
 
 class TimingExprLet : public TimingExpr
@@ -136,6 +139,7 @@ class TimingExprLet : public TimingExpr
     { }
 
     uint64_t eval(TimingExprEvalContext &context);
+    uint64_t evalFwd(TimingExprEvalContext &context);
 };
 
 class TimingExprRef : public TimingExpr
@@ -149,6 +153,7 @@ class TimingExprRef : public TimingExpr
     { }
 
     uint64_t eval(TimingExprEvalContext &context);
+    uint64_t evalFwd(TimingExprEvalContext &context);
 };
 
 class TimingExprUn : public TimingExpr
@@ -164,6 +169,7 @@ class TimingExprUn : public TimingExpr
     { }
 
     uint64_t eval(TimingExprEvalContext &context);
+    uint64_t evalFwd(TimingExprEvalContext &context);
 };
 
 class TimingExprBin : public TimingExpr
@@ -181,6 +187,7 @@ class TimingExprBin : public TimingExpr
     { }
 
     uint64_t eval(TimingExprEvalContext &context);
+    uint64_t evalFwd(TimingExprEvalContext &context);
 };
 
 class TimingExprIf : public TimingExpr
@@ -198,6 +205,7 @@ class TimingExprIf : public TimingExpr
     { }
 
     uint64_t eval(TimingExprEvalContext &context);
+    uint64_t evalFwd(TimingExprEvalContext &context);
 };
 
 } // namespace gem5
