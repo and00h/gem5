@@ -194,6 +194,13 @@ class ThreadContext : public PCEventScope
     virtual void setReg(const RegId &reg, RegVal val);
     virtual void setReg(const RegId &reg, const void *val) = 0;
 
+    virtual RegVal getFwdReg(const RegId &reg) const;
+    virtual void getFwdReg(const RegId &reg, void *val) const { getReg(reg, val); }
+    virtual void *getFwdWritableReg(const RegId &reg) { return getWritableReg(reg); }
+
+    virtual void setFwdReg(const RegId &reg, RegVal val);
+    virtual void setFwdReg(const RegId &reg, const void *val) { setReg(reg, val); }
+
     virtual const PCStateBase &pcState() const = 0;
 
     virtual void pcState(const PCStateBase &val) = 0;

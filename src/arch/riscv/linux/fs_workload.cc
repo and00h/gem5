@@ -64,6 +64,7 @@ FsLinux::initState()
 
         for (auto *tc: system->threads) {
             tc->setReg(int_reg::A1, params().dtb_addr);
+            tc->setFwdReg(int_reg::A1, params().dtb_addr);
         }
     } else {
         warn("No DTB file specified\n");

@@ -182,16 +182,37 @@ class CheckerCPU : public BaseCPU, public ExecContext
         return thread->getReg(id);
     }
 
+    RegVal
+    getFwdRegOperand(const StaticInst *si, int idx) override
+    {
+        const RegId& id = si->srcRegIdx(idx);
+        if (id.is(InvalidRegClass))
+            return 0;
+        return thread->getFwdReg(id);
+    }
+
     void
     getRegOperand(const StaticInst *si, int idx, void *val) override
     {
         thread->getReg(si->srcRegIdx(idx), val);
     }
 
+    void
+    getFwdRegOperand(const StaticInst *si, int idx, void *val) override
+    {
+        thread->getFwdReg(si->srcRegIdx(idx), val);
+    }
+
     void *
     getWritableRegOperand(const StaticInst *si, int idx) override
     {
         return thread->getWritableReg(si->destRegIdx(idx));
+    }
+
+    void *
+    getFwdWritableRegOperand(const StaticInst *si, int idx) override
+    {
+        return thread->getFwdWritableReg(si->destRegIdx(idx));
     }
 
     void
@@ -206,6 +227,17 @@ class CheckerCPU : public BaseCPU, public ExecContext
     }
 
     void
+    setFwdRegOperand(const StaticInst *si, int idx, RegVal val) override
+    {
+        const RegId& id = si->destRegIdx(idx);
+        if (id.is(InvalidRegClass))
+            return;
+        const RegId flat = id.flatten(*thread->getIsaPtr());
+        thread->setFwdReg(flat, val);
+        //result.emplace(flat.regClass(), val);
+    }
+
+    void
     setRegOperand(const StaticInst *si, int idx, const void *val) override
     {
         const RegId& id = si->destRegIdx(idx);
@@ -214,6 +246,17 @@ class CheckerCPU : public BaseCPU, public ExecContext
         const RegId flat = id.flatten(*thread->getIsaPtr());
         thread->setReg(flat, val);
         result.emplace(flat.regClass(), val);
+    }
+
+    void
+    setFwdRegOperand(const StaticInst *si, int idx, const void *val) override
+    {
+        const RegId& id = si->destRegIdx(idx);
+        if (id.is(InvalidRegClass))
+            return;
+        const RegId flat = id.flatten(*thread->getIsaPtr());
+        thread->setFwdReg(flat, val);
+        //result.emplace(flat.regClass(), val);
     }
 
     bool readPredicate() const override { return thread->readPredicate(); }

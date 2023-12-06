@@ -66,16 +66,18 @@ Execute::Execute(const std::string &name_,
     const BaseMinorCPUParams &params,
     Latch<ForwardInstData>::Output inp_,
     Latch<BranchData>::Input out_, 
+    Latch<BranchData>::Input branch_out_wb_, 
     std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer,
     Latch<ForwardInstData>::Input insts_out_) :
     Named(name_),
     inp(inp_),
     out(out_),
+    branch_out_wb(branch_out_wb_),
     out_insts(insts_out_),
     cpu(cpu_),
     nextStageReserve(next_stage_input_buffer),
     outputWidth(1),
-    processMoreThanOneInput(params.decodeCycleInput),
+    processMoreThanOneInput(false),
     issueLimit(params.executeIssueLimit),
     memoryIssueLimit(params.executeMemoryIssueLimit),
     commitLimit(params.executeCommitLimit),
@@ -381,6 +383,8 @@ Execute::handleMemResponse(MinorDynInstPtr inst,
         /* Complete the memory access instruction */
         fault = inst->staticInst->completeAcc(packet, &context,
             inst->traceData);
+        inst->executed = true;
+        context.writeback(inst->staticInst);
 
         if (fault != NoFault) {
             /* Invoke fault created by instruction completion */
@@ -1059,7 +1063,7 @@ void Execute::checkSuspension(ThreadID thread_id, MinorDynInstPtr inst, gem5::Th
 
 bool
 Execute::commitInst(MinorDynInstPtr inst, ForwardInstData &insts_out, unsigned int *output_index, bool early_memory_issue,
-    BranchData &branch, Fault &fault)
+    BranchData &branch, Fault &fault, bool &issued_mem_ref)
 {
     ThreadID thread_id = inst->id.threadId;
     ThreadContext *thread = cpu.getContext(thread_id);
@@ -1082,21 +1086,57 @@ Execute::commitInst(MinorDynInstPtr inst, ForwardInstData &insts_out, unsigned i
 
         fault = inst->fault;
         inst->fault->invoke(thread, NULL);
-
+        inst->executed = true;
         tryToBranch(inst, fault, branch);
     } else if (inst->isInst() && inst->staticInst->isQuiesce()
             && !branch.isBubble()){
         /* This instruction can suspend, need to be able to communicate
          * backwards, so no other branches may evaluate this cycle*/
         completed_inst = false;
-    } else {
-        DPRINTF(MinorExecute, "Sending inst to memory: %s\n", *inst);
+    } else if (inst->staticInst->isMemRef()) {
+        startMemRefExecution(inst, branch, fault, thread, false, completed_inst, issued_mem_ref);
+    } else if (inst->isInst() && inst->staticInst->isFullMemBarrier() &&
+        !cpu.getLSQ().canPushIntoStoreBuffer())
+    {
+        DPRINTF(MinorExecute, "Can't commit data barrier inst: %s yet as"
+            " there isn't space in the store buffer\n", *inst);
 
+        completed_inst = false;
+    } else {
+        ExecContext context(cpu, *cpu.threads[thread_id], inst);
+
+        fault = inst->staticInst->execute(&context, inst->traceData);
+
+        if (inst->traceData)
+            inst->traceData->setPredicate(context.readPredicate());
+
+        if (fault != NoFault) {
+            if (inst->traceData) {
+                if (debug::ExecFaulting) {
+                    inst->traceData->setFaulting(true);
+                } else {
+                    delete inst->traceData;
+                    inst->traceData = NULL;
+                }
+            }
+
+            DPRINTF(MinorExecute, "Fault in execute of inst: %s fault: %s\n",
+                *inst, fault->name());
+            fault->invoke(thread, inst->staticInst);
+        }
+        if (inst->staticInst->isControl()) {
+            DPRINTF(MinorExecute, "Executing control inst: %s\n", *inst);
+            context.writeback(inst->staticInst);
+            inst->executed = true;
+            tryToBranch(inst, fault, branch);
+        }
+        DPRINTF(MinorExecute, "Sending inst to writeback: %s\n", *inst);
+    
         packIntoOutput(inst, insts_out, output_index);
-        tryToBranch(inst, fault, branch);
     }
 
     if (completed_inst) {
+        
         /* Keep a copy of this instruction's predictionSeqNum just in case
          * we need to issue a branch without an instruction (such as an
          * interrupt) */
@@ -1643,6 +1683,7 @@ Execute::commit(ThreadID thread_id,
             DPRINTF(MinorExecute, "Discarding inst: %s as its stream"
                 " state was unexpected, expected: %d\n",
                 *inst, ex_info.streamSeqNum);
+            inst->executed = true;
 
             if (fault == NoFault)
                 cpu.stats.numDiscardedOps++;
@@ -1857,7 +1898,7 @@ Execute::sendOutput(ThreadID thread_id, ForwardInstData &insts_out, unsigned int
                             thread, NULL);
 
                         uint64_t extra_delay = inst->extraCommitDelayExpr->
-                            eval(context);
+                            evalFwd(context);
 
                         DPRINTF(MinorExecute, "Extra commit delay expr"
                             " result: %d\n", extra_delay);
@@ -1897,8 +1938,7 @@ Execute::sendOutput(ThreadID thread_id, ForwardInstData &insts_out, unsigned int
                         completed_inst = false;
                     } else {
                         completed_inst = commitInst(inst, insts_out, output_index,
-                            early_memory_issue, branch, fault,
-                            committed_inst, issued_mem_ref);
+                            early_memory_issue, branch, fault, issued_mem_ref);
                     }
                 } else {
                     /* Discard instruction */
@@ -1936,12 +1976,22 @@ Execute::sendOutput(ThreadID thread_id, ForwardInstData &insts_out, unsigned int
                 cpu.stats.numDiscardedOps++;
         }
 
+        if (completed_inst && inst->isMemRef()) {
+            /* The MemRef could have been discarded from the FU or the memory
+             *  queue, so just check an FU instruction */
+            if (!ex_info.inFUMemInsts->empty() &&
+                ex_info.inFUMemInsts->front().inst == inst)
+            {
+                ex_info.inFUMemInsts->pop();
+            }
+        }
+
         /* Mark the mem inst as being in the LSQ */
         if (issued_mem_ref) {
             inst->fuIndex = 0;
             inst->inLSQ = true;
         }
-        if (completed_inst) {
+        if (completed_inst && !(issued_mem_ref && fault == NoFault)) {
             finalizeCompletedInstruction(thread_id, inst, ex_info, fault, issued_mem_ref, committed_inst);
         }
 
@@ -1966,6 +2016,8 @@ Execute::evaluate()
         inputBuffer[inp.outputWire->threadId].setTail(*inp.outputWire);
 
     BranchData &branch = *out.inputWire;
+    BranchData &writeback_branch = *branch_out_wb.inputWire;
+
     ForwardInstData &insts_out = *out_insts.inputWire;
     unsigned int output_index = 0;
 
@@ -2042,6 +2094,7 @@ Execute::evaluate()
         cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
 
     /* Note activity of following buffer */
+    writeback_branch = branch;
     if (!branch.isBubble() || !insts_out.isBubble()) {
         cpu.activityRecorder->activity();
     }

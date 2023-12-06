@@ -202,10 +202,14 @@ class RiscvLinux64 : public RiscvLinux, public OpenFlagTable<RiscvLinux64>
               uint64_t stack, uint64_t tls)
     {
         ctc->getIsaPtr()->copyRegsFrom(ptc);
-        if (flags & TGT_CLONE_SETTLS)
+        if (flags & TGT_CLONE_SETTLS){
             ctc->setReg(RiscvISA::ThreadPointerReg, tls);
-        if (stack)
+            ctc->setFwdReg(RiscvISA::ThreadPointerReg, tls);
+        }
+        if (stack) {
             ctc->setReg(RiscvISA::StackPointerReg, stack);
+            ctc->setFwdReg(RiscvISA::StackPointerReg, stack);
+        }
     }
 };
 
@@ -371,8 +375,10 @@ class RiscvLinux32 : public RiscvLinux, public OpenFlagTable<RiscvLinux32>
               uint64_t stack, uint64_t tls)
     {
         ctc->getIsaPtr()->copyRegsFrom(ptc);
-        if (stack)
+        if (stack) {
             ctc->setReg(RiscvISA::StackPointerReg, stack);
+            ctc->setFwdReg(RiscvISA::StackPointerReg, stack);
+        }
     }
 };
 

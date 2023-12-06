@@ -188,7 +188,7 @@ class MinorDynInst : public RefCounted
     /** This instruction was predicted to change control flow and
      *  the following instructions will have a newer predictionSeqNum */
     bool predictedTaken = false;
-
+    bool executed = false;
     /** Predicted branch target */
     std::unique_ptr<PCStateBase> predictedTarget;
 

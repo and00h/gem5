@@ -69,8 +69,8 @@ struct GenericSyscallABI32 : public GenericSyscallABI
     static uint64_t
     mergeRegs(ThreadContext *tc, const RegId &low_id, const RegId &high_id)
     {
-        RegVal low = tc->getReg(low_id);
-        RegVal high = tc->getReg(high_id);
+        RegVal low = tc->getFwdReg(low_id);
+        RegVal high = tc->getFwdReg(high_id);
         return insertBits(low, 63, 32, high);
     }
 };
@@ -91,7 +91,7 @@ struct Argument<ABI, Arg,
     {
         panic_if(state >= ABI::ArgumentRegs.size(),
                 "Ran out of syscall argument registers.");
-        return tc->getReg(ABI::ArgumentRegs[state++]);
+        return tc->getFwdReg(ABI::ArgumentRegs[state++]);
     }
 };
 
@@ -107,7 +107,7 @@ struct Argument<ABI, Arg,
     {
         panic_if(state >= ABI::ArgumentRegs.size(),
                 "Ran out of syscall argument registers.");
-        return bits(tc->getReg(ABI::ArgumentRegs[state++]), 31, 0);
+        return bits(tc->getFwdReg(ABI::ArgumentRegs[state++]), 31, 0);
     }
 };
 

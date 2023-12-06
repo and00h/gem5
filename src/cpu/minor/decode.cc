@@ -993,11 +993,13 @@ Decode::getScheduledThread()
     }
 
     for (auto tid : priority_list) {
-        if (getInput(tid) && !decodeInfo[tid].blocked) {
+        if (/* getInput(tid) &&  */!decodeInfo[tid].blocked) {
             threadPriority = tid;
             return tid;
         }
     }
+
+    DPRINTF(Decode, "No thread selected\n");
 
    return InvalidThreadID;
 }

@@ -86,6 +86,8 @@ build_tools = Dir('#build_tools')
 # as gem5. This is in an unorthodox location to avoid building it for every
 # variant.
 gem5py_env = gem5py_env.Clone()
+gem5py_env.Tool('compilation_db')
+gem5py_env.CompilationDatabase()
 gem5py = gem5py_env.File('gem5py')
 gem5py_m5 = gem5py_env.File('gem5py_m5')
 gem5py_env['GEM5PY'] = gem5py

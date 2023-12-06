@@ -60,33 +60,33 @@ namespace gem5
 GEM5_DEPRECATED_NAMESPACE(Minor, minor);
 namespace minor
 {
-
-    Memory::Memory(const std::string &name_,
-                   MinorCPU &cpu_,
-                   const BaseMinorCPUParams &params,
-                   Latch<ForwardInstData>::Output inp_,
-                   Latch<ForwardInstData>::Input out_,
-                   std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer,
-                   Latch<BranchData>::Input branch_out_) :
-            Named(name_),
-            inp(inp_),
-            out(out_),
-            branch_out(out_),
-            cpu(cpu_),
-            commitLimit(1),
-            memoryCommitLimit(params.executeMemoryCommitLimit),
-            processMoreThanOneInput(params.executeCycleInput),
-            nextStageReserve(next_stage_input_buffer),
-            setTraceTimeOnCommit(params.executeSetTraceTimeOnCommit),
-            memoryInfo(params.numThreads,
-                       MemoryThreadInfo(params.executeCommitLimit)),
-            interruptPriority(0),
-            commitPriority(0)
+Memory::Memory(const std::string &name_,
+               MinorCPU &cpu_,
+               const BaseMinorCPUParams &params,
+               Latch<ForwardInstData>::Output inp_,
+               Latch<ForwardInstData>::Input out_,
+               std::vector<InputBuffer < ForwardInstData>> &next_stage_input_buffer,
+               Latch<BranchData>::Input branch_out_) :
+    Named (name_),
+    inp(inp_),
+    out(out_),
+    branch_out(branch_out_),
+    cpu(cpu_),
+    commitLimit(1),
+    outputWidth(1),
+    memoryCommitLimit(params.executeMemoryCommitLimit),
+    processMoreThanOneInput(params.executeCycleInput),
+    nextStageReserve(next_stage_input_buffer),
+    setTraceTimeOnCommit(params.executeSetTraceTimeOnCommit),
+    memoryInfo(params.numThreads,
+               MemoryThreadInfo(params.executeCommitLimit)),
+    interruptPriority(0),
+    commitPriority(0)
     {
-        if (commitLimit < 1) {
-            fatal("%s: executeCommitLimit must be >= 1 (%d)\n", name_,
-                  commitLimit);
-        }
+    if (commitLimit < 1) {
+        fatal("%s: executeCommitLimit must be >= 1 (%d)\n", name_,
+              commitLimit);
+    }
 
         if (memoryCommitLimit > commitLimit) {
             fatal("%s: executeMemoryCommitLimit (%d) must be <="
@@ -117,8 +117,7 @@ namespace minor
     }
 
     const ForwardInstData *
-    Memory::getInput(ThreadID tid)
-    {
+    Memory::getInput(ThreadID tid) {
         /* Get a line from the inputBuffer to work with */
         if (!inputBuffer[tid].empty()) {
             const ForwardInstData &head = inputBuffer[tid].front();
@@ -130,8 +129,7 @@ namespace minor
     }
 
     void
-    Memory::popInput(ThreadID tid)
-    {
+    Memory::popInput(ThreadID tid) {
         if (!inputBuffer[tid].empty())
             inputBuffer[tid].pop();
 
@@ -139,8 +137,7 @@ namespace minor
     }
 
     void
-    Memory::tryToBranch(MinorDynInstPtr inst, Fault fault, BranchData &branch)
-    {
+    Memory::tryToBranch(MinorDynInstPtr inst, Fault fault, BranchData &branch) {
         ThreadContext *thread = cpu.getContext(inst->id.threadId);
         const std::unique_ptr<PCStateBase> pc_before(inst->pc->clone());
         std::unique_ptr<PCStateBase> target(thread->pcState().clone());
@@ -222,8 +219,7 @@ namespace minor
             ThreadID tid,
             BranchData::Reason reason,
             MinorDynInstPtr inst, const PCStateBase &target,
-            BranchData &branch)
-    {
+            BranchData &branch) {
         if (reason != BranchData::NoBranch) {
             /* Bump up the stream sequence number on a real branch*/
             if (BranchData::isStreamChange(reason))
@@ -244,15 +240,13 @@ namespace minor
     }
 
     bool
-    Memory::isInterrupted(ThreadID thread_id) const
-    {
+    Memory::isInterrupted(ThreadID thread_id) const {
         return cpu.checkInterrupts(thread_id);
     }
 
 /** Increment a cyclic buffer index for indices [0, cycle_size-1] */
     inline unsigned int
-    cyclicIndexInc(unsigned int index, unsigned int cycle_size)
-    {
+    cyclicIndexInc(unsigned int index, unsigned int cycle_size) {
         unsigned int ret = index + 1;
 
         if (ret == cycle_size)
@@ -263,8 +257,7 @@ namespace minor
 
 /** Decrement a cyclic buffer index for indices [0, cycle_size-1] */
     inline unsigned int
-    cyclicIndexDec(unsigned int index, unsigned int cycle_size)
-    {
+    cyclicIndexDec(unsigned int index, unsigned int cycle_size) {
         int ret = index - 1;
 
         if (ret < 0)
@@ -274,8 +267,7 @@ namespace minor
     }
 
     bool
-    Memory::tryPCEvents(ThreadID thread_id)
-    {
+    Memory::tryPCEvents(ThreadID thread_id) {
         ThreadContext *thread = cpu.getContext(thread_id);
         unsigned int num_pc_event_checks = 0;
 
@@ -296,16 +288,14 @@ namespace minor
     }
 
     void
-    Memory::doInstCommitAccounting(MinorDynInstPtr inst)
-    {
+    Memory::doInstCommitAccounting(MinorDynInstPtr inst) {
         assert(!inst->isFault());
 
         MinorThread *thread = cpu.threads[inst->id.threadId];
 
         /* Increment the many and various inst and op counts in the
          *  thread and system */
-        if (!inst->staticInst->isMicroop() || inst->staticInst->isLastMicroop())
-        {
+        if (!inst->staticInst->isMicroop() || inst->staticInst->isLastMicroop()) {
             thread->numInst++;
             thread->threadStats.numInsts++;
             cpu.stats.numInsts++;
@@ -359,7 +349,9 @@ namespace minor
         cpu.probeInstCommit(inst->staticInst, inst->pc->instAddr());
     }
 
-    void Memory::actuallyExecuteInst(ThreadID thread_id, MinorDynInstPtr inst, Fault &fault, gem5::ThreadContext *thread, bool &committed) {
+    void
+    Memory::actuallyExecuteInst(ThreadID thread_id, MinorDynInstPtr inst, Fault &fault, gem5::ThreadContext *thread,
+                                bool &committed) {
         ExecContext context(cpu, *cpu.threads[thread_id], inst);
 
         fault = inst->staticInst->execute(&context,
@@ -387,7 +379,8 @@ namespace minor
         }
     }
 
-    void Memory::checkSuspension(ThreadID thread_id, MinorDynInstPtr inst, gem5::ThreadContext *thread, BranchData &branch) {
+    void
+    Memory::checkSuspension(ThreadID thread_id, MinorDynInstPtr inst, gem5::ThreadContext *thread, BranchData &branch) {
         if (!inst->isFault() &&
             thread->status() == ThreadContext::Suspended &&
             branch.isBubble() && /* It didn't branch too */
@@ -409,9 +402,8 @@ namespace minor
     }
 
     bool
-    Memory::commitInst(MinorDynInstPtr inst,
-                       BranchData &branch, Fault &fault, bool &committed)
-    {
+    Memory::commitInst(MinorDynInstPtr inst, ForwardInstData &insts_out, unsigned int *output_index, bool early_memory_issue,
+                       BranchData &branch, Fault &fault, bool &committed) {
         ThreadID thread_id = inst->id.threadId;
         ThreadContext *thread = cpu.getContext(thread_id);
 
@@ -421,8 +413,7 @@ namespace minor
         /* Is the thread for this instruction suspended?  In that case, just
          *  stall as long as there are no pending interrupts */
         if (thread->status() == ThreadContext::Suspended &&
-            !isInterrupted(thread_id))
-        {
+            !isInterrupted(thread_id)) {
             panic("We should never hit the case where we try to commit from a "
                   "suspended thread as the streamSeqNum should not match");
         } else if (inst->isFault()) {
@@ -449,39 +440,38 @@ namespace minor
              *  Execute::commit will commit it.
              */
             bool predicate_passed = false;
-            bool completed_mem_inst = executeMemRefInst(inst, branch,
-                                                        predicate_passed, fault);
+//            bool completed_mem_inst = executeMemRefInst(inst, branch,
+//                                                        predicate_passed, fault);
 
-            if (completed_mem_inst && fault != NoFault) {
-                if (early_memory_issue) {
-                    DPRINTF(MinorExecute, "Fault in early executing inst: %s\n",
-                            fault->name());
-                    /* Don't execute the fault, just stall the instruction
-                     *  until it gets to the head of inFlightInsts */
-                    inst->canEarlyIssue = false;
-                    /* Not completed as we'll come here again to pick up
-                     * the fault when we get to the end of the FU */
-                    completed_inst = false;
-                } else {
-                    DPRINTF(MinorExecute, "Fault in execute: %s\n",
-                            fault->name());
-                    fault->invoke(thread, NULL);
-
-                    tryToBranch(inst, fault, branch);
-                    completed_inst = true;
-                }
-            } else {
-                completed_inst = completed_mem_inst;
-            }
-            completed_mem_issue = completed_inst;
-        } else if (inst->isInst() && inst->staticInst->isFullMemBarrier() &&
-                   !cpu.getLSQ().canPushIntoStoreBuffer())
-        {
-            DPRINTF(MinorExecute, "Can't commit data barrier inst: %s yet as"
-                                  " there isn't space in the store buffer\n", *inst);
-
-            completed_inst = false;
-        } else {
+//            if (completed_mem_inst && fault != NoFault) {
+//                if (early_memory_issue) {
+//                    DPRINTF(MinorExecute, "Fault in early executing inst: %s\n",
+//                            fault->name());
+//                    /* Don't execute the fault, just stall the instruction
+//                     *  until it gets to the head of inFlightInsts */
+//                    inst->canEarlyIssue = false;
+//                    /* Not completed as we'll come here again to pick up
+//                     * the fault when we get to the end of the FU */
+//                    completed_inst = false;
+//                } else {
+//                    DPRINTF(MinorExecute, "Fault in execute: %s\n",
+//                            fault->name());
+//                    fault->invoke(thread, NULL);
+//
+//                    tryToBranch(inst, fault, branch);
+//                    completed_inst = true;
+//                }
+//            } else {
+//                completed_inst = completed_mem_inst;
+//            }
+//            completed_mem_issue = completed_inst;
+//        } else if (inst->isInst() && inst->staticInst->isFullMemBarrier() &&
+//                   !cpu.getLSQ().canPushIntoStoreBuffer()) {
+//            DPRINTF(MinorExecute, "Can't commit data barrier inst: %s yet as"
+//                                  " there isn't space in the store buffer\n", *inst);
+//
+//            completed_inst = false;
+//        } else
             DPRINTF(MinorExecute, "Sending inst to Writeback: %s\n", *inst);
 
             packIntoOutput(inst, insts_out, output_index);
@@ -501,39 +491,10 @@ namespace minor
         return completed_inst;
     }
 
-    bool Memory::tryCommit(ThreadID thread_id,
-                           const MinorDynInstPtr inst,
-                           BranchData &branch, Fault &fault,
-                           Cycles now,
-                           bool discard_inst,
-                           bool early_memory_issue,
-                           bool committed_inst,
-                           bool issued_mem_ref
-    )
-    {
-        bool completed_inst = false;
-        /* Is this instruction discardable as its streamSeqNum
-            *  doesn't match? */
-        if (!discard_inst) {
-            /* Try to commit or discard a non-memory instruction.
-                *  Memory ops are actually 'committed' from this FUs
-                *  and 'issued' into the memory system so we need to
-                *  account for them later (commit_was_mem_issue gets
-                *  set) */
-            completed_inst = commitInst(inst,
-                                        branch, fault,
-                                        committed_inst);
-        } else {
-            /* Discard instruction */
-            completed_inst = true;
-        }
-
-        return completed_inst;
-    }
-
     void
-    Memory::doCommitAccounting(MinorDynInstPtr const inst, MemoryThreadInfo &mem_info, unsigned int &num_insts_committed, unsigned int &num_mem_refs_committed, bool completed_mem_ref)
-    {
+    Memory::doCommitAccounting(MinorDynInstPtr const inst, MemoryThreadInfo &mem_info,
+                               unsigned int &num_insts_committed, unsigned int &num_mem_refs_committed,
+                               bool completed_mem_ref) {
         bool is_no_cost_inst = inst->isNoCostInst();
 
         /* Don't show no cost instructions as having taken a commit
@@ -563,15 +524,44 @@ namespace minor
     }
 
     void
-    Memory::finalizeCompletedInstruction(ThreadID thread_id, const MinorDynInstPtr inst, MemoryThreadInfo &mem_info, const Fault &fault, bool committed_inst)
+    Memory::tryToHandleMemResponses(
+            MemoryThreadInfo &ex_info,
+            bool discard_inst,
+            bool &committed_inst,
+            bool &completed_mem_ref,
+            bool &completed_inst,
+            MinorDynInstPtr inst,
+            LSQ::LSQRequestPtr mem_response,
+            BranchData &branch,
+            Fault &fault)
     {
+        DPRINTF(MinorExecute, "Trying to commit mem response: %s\n", *inst);
+
+        /* Complete or discard the response */
+        if (discard_inst) {
+            DPRINTF(MinorExecute, "Discarding mem inst: %s as its"
+                                  " stream state was unexpected, expected: %d\n",
+                    *inst, ex_info.streamSeqNum);
+
+            cpu.getLSQ().popResponse(mem_response);
+        } else {
+            handleMemResponse(inst, mem_response, branch, fault);
+            committed_inst = true;
+        }
+
+        completed_mem_ref = true;
+        completed_inst = true;
+    }
+    void
+    Memory::finalizeCompletedInstruction(ThreadID thread_id, const MinorDynInstPtr inst, MemoryThreadInfo &mem_info,
+                                         const Fault &fault, bool committed_inst) {
         if (fault != NoFault) {
             /* Note that this includes discarded insts */
             DPRINTF(MinorMemory, "Completed inst: %s\n", *inst);
 
             /* Got to the end of a full instruction? */
             mem_info.lastCommitWasEndOfMacroop = inst->isFault() ||
-                                                inst->isLastOpInInst();
+                                                 inst->isLastOpInInst();
 
             /* lastPredictionSeqNum is kept as a convenience to prevent its
              *  value from changing too much on the minorview display */
@@ -599,11 +589,10 @@ namespace minor
                                   avoids having partially executed instructions */
                    bool discard,              // discard all instructions
                    BranchData &branch         // Eventual branches get written here
-    )
-    {
+    ) {
         Fault fault = NoFault;
         Cycles now = cpu.curCycle();
-        LSQ& lsq = cpu.getLSQ();
+        LSQ &lsq = cpu.getLSQ();
         const ForwardInstData *insts_in = getInput(thread_id);
         MemoryThreadInfo &mem_info = memoryInfo[thread_id];
 
@@ -657,8 +646,7 @@ namespace minor
                fault == NoFault && /* No faults */
                completed_inst && /* Still finding instructions to execute */
                num_insts_committed != commitLimit /* Not reached commit limit */
-                )
-        {
+                ) {
             if (only_commit_microops) {
                 DPRINTF(MinorInterrupt, "Committing tail of insts before"
                                         " interrupt: %s\n",
@@ -699,11 +687,11 @@ namespace minor
                 updateBranchData(thread_id, BranchData::UnpredictedBranch,
                                  MinorDynInst::bubble(), thread->pcState(), branch);
             } else if (mem_response &&
-                       num_mem_refs_committed < memoryCommitLimit)
-            {
+                       num_mem_refs_committed < memoryCommitLimit) {
                 discard_inst = inst->id.streamSeqNum !=
                                mem_info.streamSeqNum || discard;
-                tryToHandleMemResponses(ex_info, discard_inst, committed_inst, completed_mem_ref, completed_inst, inst, mem_response, branch, fault);
+                tryToHandleMemResponses(mem_info, discard_inst, committed_inst, completed_mem_ref, completed_inst, inst,
+                                        mem_response, branch, fault);
             } else if (can_commit_insts) {
                 /* If true, this instruction will, subject to timing tweaks,
                  *  be considered for completion.  try_to_commit flattens
@@ -726,14 +714,14 @@ namespace minor
                         if (!inst->isFault() &&
                             lsq.getLastMemBarrier(thread_id) <
                             inst->id.execSeqNum &&
-                            lsq.getLastMemBarrier(thread_id) != 0)
-                        {
+                            lsq.getLastMemBarrier(thread_id) != 0) {
                             DPRINTF(MinorExecute, "Not committing inst: %s yet"
                                                   " as there are incomplete barriers in flight\n",
                                     *inst);
                             completed_inst = false;
                         } else {
-                            completed_inst = commitInst(inst, branch, fault,
+                            completed_inst = commitInst(inst, insts_out, output_index,
+                                                        early_memory_issue, branch, fault,
                                                         committed_inst);
                         }
                     } else {
@@ -777,15 +765,13 @@ namespace minor
     }
 
     bool
-    Memory::isInbetweenInsts(ThreadID thread_id) const
-    {
+    Memory::isInbetweenInsts(ThreadID thread_id) const {
         return memoryInfo[thread_id].lastCommitWasEndOfMacroop; // &&
         //!lsq.accessesInFlight();
     }
 
     void
-    Memory::evaluate()
-    {
+    Memory::evaluate() {
         if (!inp.outputWire->isBubble()) {
             DPRINTF(MinorMemory, "Received an instruction\n");
             inputBuffer[inp.outputWire->threadId].setTail(*inp.outputWire);
@@ -803,7 +789,7 @@ namespace minor
         } else {
             ThreadID commit_tid = getCommittingThread();
             if (commit_tid != InvalidThreadID) {
-                MemoryThreadInfo& commit_info = memoryInfo[commit_tid];
+                MemoryThreadInfo &commit_info = memoryInfo[commit_tid];
 
                 DPRINTF(MinorMemory, "Attempting to commit [tid:%d]\n",
                         commit_tid);
@@ -872,8 +858,7 @@ namespace minor
     }
 
     bool
-    Memory::hasInterrupt(ThreadID thread_id)
-    {
+    Memory::hasInterrupt(ThreadID thread_id) {
         if (FullSystem && cpu.getInterruptController(thread_id)) {
             return memoryInfo[thread_id].drainState == NotDraining &&
                    isInterrupted(thread_id);
@@ -883,8 +868,7 @@ namespace minor
     }
 
     void
-    Memory::minorTrace() const
-    {
+    Memory::minorTrace() const {
         std::ostringstream insts;
         std::ostringstream stalled;
 
@@ -902,8 +886,7 @@ namespace minor
     }
 
     inline ThreadID
-    Memory::getCommittingThread()
-    {
+    Memory::getCommittingThread() {
         std::vector<ThreadID> priority_list;
 
         switch (cpu.threadPolicy) {
@@ -919,7 +902,7 @@ namespace minor
                 panic("Invalid thread policy");
         }
 
-        for (auto tid : priority_list) {
+        for (auto tid: priority_list) {
             if (getInput(tid)) {
                 commitPriority = tid;
                 return tid;
@@ -930,8 +913,7 @@ namespace minor
     }
 
     void
-    Memory::drainResume()
-    {
+    Memory::drainResume() {
         DPRINTF(Drain, "MinorMemory drainResume\n");
 
         for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
@@ -941,10 +923,8 @@ namespace minor
         cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
     }
 
-    std::ostream &operator <<(std::ostream &os, Memory::DrainState state)
-    {
-        switch (state)
-        {
+    std::ostream &operator<<(std::ostream &os, Memory::DrainState state) {
+        switch (state) {
             case Memory::NotDraining:
                 os << "NotDraining";
                 break;
@@ -966,15 +946,13 @@ namespace minor
     }
 
     void
-    Memory::setDrainState(ThreadID thread_id, DrainState state)
-    {
+    Memory::setDrainState(ThreadID thread_id, DrainState state) {
         DPRINTF(Drain, "setDrainState[%d]: %s\n", thread_id, state);
         memoryInfo[thread_id].drainState = state;
     }
 
     unsigned int
-    Memory::drain()
-    {
+    Memory::drain() {
         DPRINTF(Drain, "MinorMemory drain\n");
 
         for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
@@ -995,8 +973,7 @@ namespace minor
     }
 
     bool
-    Memory::isDrained()
-    {
+    Memory::isDrained() {
         for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
             if (!inputBuffer[tid].empty()) {
                 return false;
@@ -1007,24 +984,6 @@ namespace minor
     }
 
     Memory::~Memory() {}
-
-    bool
-    Memory::instIsRightStream(MinorDynInstPtr inst)
-    {
-        return inst->id.streamSeqNum == memoryInfo[inst->id.threadId].streamSeqNum;
-    }
-
-    bool
-    Memory::instIsHeadInst(MinorDynInstPtr inst)
-    {
-        bool ret = false;
-
-        const ForwardInstData *insts = getInput(inst->id.threadId);
-        if (getInput(inst->id.threadId))
-            ret = insts->insts[0]->id == inst->id;
-
-        return ret;
-    }
 
 } // namespace minor
 } // namespace gem5
