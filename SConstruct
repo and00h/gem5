@@ -145,6 +145,7 @@ AddOption('--gprof', action='store_true',
           help='Enable support for the gprof profiler')
 AddOption('--pprof', action='store_true',
           help='Enable support for the pprof profiler')
+AddOption('--gcov', action='store_true', help='Enable support for gcov')
 
 # Inject the built_tools directory into the python path.
 sys.path[1:1] = [ Dir('#build_tools').abspath ]
@@ -550,7 +551,9 @@ for variant_path in variant_paths:
         env.Append(CCFLAGS=['-g'],
                 LINKFLAGS=['-Wl,--no-as-needed', '-lprofiler',
                     '-Wl,--as-needed'])
-
+    if GetOption('gcov'):
+        env.Append(CCFLAGS=['-fprofile-arcs', '-ftest-coverage', '-Wunused'], LINKFLAGS=['-fprofile-arcs'])
+        
     env['HAVE_PKG_CONFIG'] = env.Detect('pkg-config')
 
     with gem5_scons.Configure(env) as conf:
