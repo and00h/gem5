@@ -38,3 +38,6 @@ configs/example/memcheck.cfg
 configs/dram/lowp_sweep.cfg
 .pyenv
 .vscode
+/cov-out
+/cov.zip
+/coverage.info
