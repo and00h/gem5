@@ -48,7 +48,7 @@
 #include "cpu/minor/activity.hh"
 #include "cpu/minor/cpu.hh"
 #include "cpu/minor/writeback.hh"
-//#include "cpu/minor/memory.hh"
+// #include "cpu/minor/memory.hh"
 #include "cpu/minor/decode.hh"
 #include "cpu/minor/execute.hh"
 #include "cpu/minor/fetch1.hh"
@@ -60,110 +60,115 @@
 namespace gem5
 {
 
-GEM5_DEPRECATED_NAMESPACE(Minor, minor);
-namespace minor
-{
+  GEM5_DEPRECATED_NAMESPACE(Minor, minor);
+  namespace minor
+  {
 
-/**
- * @namespace minor
- *
- * Minor contains all the definitions within the MinorCPU apart from the CPU
- * class itself
- */
+    /**
+     * @namespace minor
+     *
+     * Minor contains all the definitions within the MinorCPU apart from the CPU
+     * class itself
+     */
 
-/** The constructed pipeline.  Kept out of MinorCPU to keep the interface
- *  between the CPU and its grubby implementation details clean. */
-class Pipeline : public Ticked
-{
-  protected:
-    MinorCPU &cpu;
-
-    /** Allow cycles to be skipped when the pipeline is idle */
-    bool allow_idling;
-
-    //Latch<ForwardLineData> f1ToF2;
-    Latch<ForwardLineData> f1ToD;
-    //Latch<BranchData> f2ToF1;
-    Latch<BranchData> dToF1;
-    //Latch<ForwardInstData> f2ToD;
-    Latch<ForwardInstData> dToE;
-    Latch<BranchData> eToF1;
-
-    Latch<ForwardInstData> eToW;
-    Latch<BranchData> eToW_branch;
-    Latch<ForwardInstData> eToM;
-    Latch<ForwardInstData> mToW;
-
-    Writeback writeback;
-//    MEM mem;
-    Execute execute;
-    Decode decode;
-    //Fetch2 fetch2;
-    Fetch1 fetch1;
-
-    LSQ lsq;
-
-    /** Activity recording for the pipeline.  This is access through the CPU
-     *  by the pipeline stages but belongs to the Pipeline as it is the
-     *  cleanest place to initialise it */
-    MinorActivityRecorder activityRecorder;
-
-  public:
-    /** Enumerated ids of the 'stages' for the activity recorder */
-    enum StageId
+    /** The constructed pipeline.  Kept out of MinorCPU to keep the interface
+     *  between the CPU and its grubby implementation details clean. */
+    class Pipeline : public Ticked
     {
+    protected:
+      MinorCPU &cpu;
+
+      /** Allow cycles to be skipped when the pipeline is idle */
+      bool allow_idling;
+
+      // Latch<ForwardLineData> f1ToF2;
+      Latch<ForwardLineData> f1ToD;
+      // Latch<BranchData> f2ToF1;
+      Latch<BranchData> dToF1;
+      // Latch<ForwardInstData> f2ToD;
+      Latch<ForwardInstData> dToE;
+      Latch<BranchData> eToF1;
+
+      Latch<ForwardInstData> eToW;
+      Latch<BranchData> eToW_branch;
+      Latch<ForwardInstData> eToM;
+      Latch<ForwardInstData> mToW;
+
+      Writeback writeback;
+      //    MEM mem;
+      Execute execute;
+      Decode decode;
+      // Fetch2 fetch2;
+      Fetch1 fetch1;
+
+      LSQ lsq;
+
+      /** Activity recording for the pipeline.  This is access through the CPU
+       *  by the pipeline stages but belongs to the Pipeline as it is the
+       *  cleanest place to initialise it */
+      MinorActivityRecorder activityRecorder;
+
+    public:
+      /** Enumerated ids of the 'stages' for the activity recorder */
+      enum StageId
+      {
         /* A stage representing wakeup of the whole processor */
         CPUStageId = 0,
         /* Real pipeline stages */
-        Fetch1StageId, Fetch2StageId, DecodeStageId, ExecuteStageId, WritebackStageId,
+        Fetch1StageId,
+        Fetch2StageId,
+        DecodeStageId,
+        ExecuteStageId,
+        MemoryStageId,
+        WritebackStageId,
         Num_StageId /* Stage count */
+      };
+
+      /** True after drain is called but draining isn't complete */
+      bool needToSignalDrained;
+
+    public:
+      Pipeline(MinorCPU &cpu_, const BaseMinorCPUParams &params);
+
+    public:
+      /** Wake up the Fetch unit.  This is needed on thread activation esp.
+       *  after quiesce wakeup */
+      void wakeupFetch(ThreadID tid);
+
+      /** Try to drain the CPU */
+      bool drain();
+
+      void drainResume();
+
+      /** Test to see if the CPU is drained */
+      bool isDrained();
+
+      /** A custom evaluate allows report in the right place (between
+       *  stages and pipeline advance) */
+      void evaluate() override;
+
+      void minorTrace() const;
+
+      /** Functions below here are BaseCPU operations passed on to pipeline
+       *  stages */
+
+      /** Return the IcachePort belonging to Fetch1 for the CPU */
+      MinorCPU::MinorCPUPort &getInstPort();
+      /** Return the DcachePort belonging to Execute for the CPU */
+      MinorCPU::MinorCPUPort &getDataPort();
+
+      /** To give the activity recorder to the CPU */
+      MinorActivityRecorder *getActivityRecorder() { return &activityRecorder; }
+
+      bool instIsRightStream(MinorDynInstPtr inst) { return execute.instIsRightStream(inst); }
+      bool instIsHeadInst(MinorDynInstPtr inst) { return execute.instIsHeadInst(inst); }
+
+      LSQ &getLSQ() { return lsq; }
+
+      std::vector<Scoreboard> &getScoreboard();
     };
 
-    /** True after drain is called but draining isn't complete */
-    bool needToSignalDrained;
-
-  public:
-    Pipeline(MinorCPU &cpu_, const BaseMinorCPUParams &params);
-
-  public:
-    /** Wake up the Fetch unit.  This is needed on thread activation esp.
-     *  after quiesce wakeup */
-    void wakeupFetch(ThreadID tid);
-
-    /** Try to drain the CPU */
-    bool drain();
-
-    void drainResume();
-
-    /** Test to see if the CPU is drained */
-    bool isDrained();
-
-    /** A custom evaluate allows report in the right place (between
-     *  stages and pipeline advance) */
-    void evaluate() override;
-
-    void minorTrace() const;
-
-    /** Functions below here are BaseCPU operations passed on to pipeline
-     *  stages */
-
-    /** Return the IcachePort belonging to Fetch1 for the CPU */
-    MinorCPU::MinorCPUPort &getInstPort();
-    /** Return the DcachePort belonging to Execute for the CPU */
-    MinorCPU::MinorCPUPort &getDataPort();
-
-    /** To give the activity recorder to the CPU */
-    MinorActivityRecorder *getActivityRecorder() { return &activityRecorder; }
-
-    bool instIsRightStream(MinorDynInstPtr inst) { return execute.instIsRightStream(inst); }
-    bool instIsHeadInst(MinorDynInstPtr inst) { return execute.instIsHeadInst(inst); }
-
-    LSQ& getLSQ() { return lsq; }
-
-    std::vector<Scoreboard>& getScoreboard();
-};
-
-} // namespace minor
+  } // namespace minor
 } // namespace gem5
 
 #endif /* __CPU_MINOR_PIPELINE_HH__ */

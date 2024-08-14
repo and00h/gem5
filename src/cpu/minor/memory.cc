@@ -9,7 +9,9 @@
 #include "debug/MinorMemory.hh"
 #include "debug/Branch.hh"
 #include "debug/Activity.hh"
-
+#include "debug/PCEvent.hh"
+#include "debug/Drain.hh"
+#include "memory.hh"
 namespace gem5
 {
     GEM5_DEPRECATED_NAMESPACE(Minor, minor);
@@ -23,6 +25,7 @@ namespace gem5
                        Latch<ForwardInstData>::Input out_,
                        Latch<BranchData>::Input branch_out_,
                        Latch<BranchData>::Output branch_in_,
+                       std::vector<Scoreboard> &scoreboard_,
                        std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer)
             : Named(name_),
               inp(inp_),
@@ -34,6 +37,7 @@ namespace gem5
               memoryIssueLimit(1),
               commitLimit(1),
               memoryCommitLimit(1),
+              scoreboard(scoreboard_),
               nextStageReserve(next_stage_input_buffer),
               outputWidth(1),
               processMoreThanOneInput(false),
@@ -347,7 +351,7 @@ namespace gem5
 
         void
         Memory::tryToHandleMemResponses(
-            MemoryThreadInfo &ex_info,
+            MemoryThreadInfo &mem_info,
             bool discard_inst,
             bool &committed_inst,
             bool &completed_mem_ref,
@@ -364,7 +368,7 @@ namespace gem5
             {
                 DPRINTF(MinorMemory, "Discarding mem inst: %s as its"
                                      " stream state was unexpected, expected: %d\n",
-                        *inst, ex_info.streamSeqNum);
+                        *inst, mem_info.streamSeqNum);
 
                 cpu.getLSQ().popResponse(mem_response);
             }
@@ -416,8 +420,8 @@ namespace gem5
             else if (inst->isInst() && inst->staticInst->isFullMemBarrier() &&
                      !cpu.getLSQ().canPushIntoStoreBuffer())
             {
-                DPRINTF(MinorExecute, "Can't commit data barrier inst: %s yet as"
-                                      " there isn't space in the store buffer\n",
+                DPRINTF(MinorMemory, "Can't commit data barrier inst: %s yet as"
+                                     " there isn't space in the store buffer\n",
                         *inst);
 
                 completed_inst = false;
@@ -576,6 +580,112 @@ namespace gem5
                     changeStream(branch_in);
                 }
             }
+        }
+
+        void
+        Memory::finalizeCompletedInstruction(ThreadID thread_id, const MinorDynInstPtr inst, MemoryThreadInfo &mem_info, const Fault &fault, bool issued_mem_ref, bool committed_inst)
+        {
+            /* Pop issued (to LSQ) and discarded mem refs from the inFUMemInsts
+             *  as they've *definitely* exited the FUs */
+            if (inst->isMemRef())
+            {
+                /* The MemRef could have been discarded from the FU or the memory
+                 *  queue, so just check an FU instruction */
+                if (!mem_info.inMemInsts->empty() &&
+                    mem_info.inMemInsts->front().inst == inst)
+                {
+                    mem_info.inMemInsts->pop();
+                }
+            }
+
+            if (!issued_mem_ref || fault != NoFault)
+            {
+                /* Note that this includes discarded insts */
+                DPRINTF(MinorMemory, "Completed inst: %s\n", *inst);
+
+                /* Got to the end of a full instruction? */
+                mem_info.lastCommitWasEndOfMacroop = inst->isFault() ||
+                                                     inst->isLastOpInInst();
+
+                /* lastPredictionSeqNum is kept as a convenience to prevent its
+                 *  value from changing too much on the minorview display */
+                mem_info.lastPredictionSeqNum = inst->id.predictionSeqNum;
+
+                /* Finished with the inst, remove it from the inst queue and
+                 *  clear its dependencies */
+                mem_info.inFlightInsts->pop();
+
+                // MOVETO: Memory
+                /* Complete barriers in the LSQ/move to store buffer */
+                if (inst->isInst() && inst->staticInst->isFullMemBarrier())
+                {
+                    DPRINTF(MinorMem, "Completing memory barrier"
+                                      " inst: %s committed: %d\n",
+                            *inst, committed_inst);
+                    cpu.getLSQ().completeMemBarrierInst(inst, committed_inst);
+                }
+                if (inst->isMemRef() || inst->staticInst->isFullMemBarrier())
+                {
+                    scoreboard[thread_id].clearInstDests(inst, inst->isMemRef());
+                }
+            }
+        }
+
+        bool
+        Memory::tryPCEvents(ThreadID thread_id)
+        {
+            ThreadContext *thread = cpu.getContext(thread_id);
+            unsigned int num_pc_event_checks = 0;
+
+            /* Handle PC events on instructions */
+            Addr oldPC;
+            do
+            {
+                oldPC = thread->pcState().instAddr();
+                cpu.threads[thread_id]->pcEventQueue.service(oldPC, thread);
+                num_pc_event_checks++;
+            } while (oldPC != thread->pcState().instAddr());
+
+            if (num_pc_event_checks > 1)
+            {
+                DPRINTF(PCEvent, "Acting on PC Event to PC: %s\n",
+                        thread->pcState());
+            }
+
+            return num_pc_event_checks > 1;
+        }
+
+        void Memory::startMemRefExecution(MinorDynInstPtr inst, BranchData &branch, Fault &fault, gem5::ThreadContext *thread, bool &completed_inst, bool &completed_mem_issue)
+        {
+            /* Memory accesses are executed in two parts:
+             *  executeMemRefInst -- calculates the EA and issues the access
+             *      to memory.  This is done here.
+             *  handleMemResponse -- handles the response packet, done by
+             *      Execute::commit
+             *
+             *  While the memory access is in its FU, the EA is being
+             *  calculated.  At the end of the FU, when it is ready to
+             *  'commit' (in this function), the access is presented to the
+             *  memory queues.  When a response comes back from memory,
+             *  Execute::commit will commit it.
+             */
+            bool predicate_passed = false;
+            bool completed_mem_inst = executeMemRefInst(inst, branch,
+                                                        predicate_passed, fault);
+
+            if (completed_mem_inst && fault != NoFault)
+            {
+                DPRINTF(MinorMemory, "Fault in memory: %s\n",
+                        fault->name());
+                fault->invoke(thread, NULL);
+                tryToBranch(inst, fault, branch);
+                completed_inst = true;
+            }
+            else
+            {
+                completed_inst = completed_mem_inst;
+            }
+            completed_mem_issue = completed_inst;
         }
 
         bool Memory::attemptIssue(ThreadID tid)
@@ -838,6 +948,101 @@ namespace gem5
             }
 
             return InvalidThreadID;
+        }
+
+        void
+        Memory::drainResume()
+        {
+            DPRINTF(Drain, "MinorMemory drainResume\n");
+
+            for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
+            {
+                setDrainState(tid, NotDraining);
+            }
+
+            cpu.wakeupOnEvent(Pipeline::MemoryStageId);
+        }
+
+        void
+        Memory::setDrainState(ThreadID thread_id, DrainState state)
+        {
+            DPRINTF(Drain, "setDrainState[%d]: %s\n", thread_id, state);
+            memoryInfo[thread_id].drainState = state;
+        }
+
+        unsigned int
+        Memory::drain()
+        {
+            DPRINTF(Drain, "MinorMemory drain\n");
+
+            for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
+            {
+                if (memoryInfo[tid].drainState == NotDraining)
+                {
+                    cpu.wakeupOnEvent(Pipeline::MemoryStageId);
+
+                    /* Go to DrainCurrentInst if we're between microops
+                     * or waiting on an unbufferable memory operation.
+                     * Otherwise we can go straight to DrainHaltFetch
+                     */
+                    if (isInbetweenInsts(tid))
+                        setDrainState(tid, DrainHaltFetch);
+                    else
+                        setDrainState(tid, DrainCurrentInst);
+                }
+            }
+            return (isDrained() ? 0 : 1);
+        }
+
+        bool
+        Memory::isDrained()
+        {
+            if (!cpu.getLSQ().isDrained())
+                return false;
+
+            for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
+            {
+                if (!inputBuffer[tid].empty() ||
+                    !memoryInfo[tid].inFlightInsts->empty())
+                {
+
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        Memory::~Memory()
+        {
+            for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
+                delete memoryInfo[tid].inFlightInsts;
+            for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
+                delete memoryInfo[tid].inMemInsts;
+        }
+
+        std::ostream &operator<<(std::ostream &os, Memory::DrainState &state)
+        {
+            switch (state)
+            {
+            case Memory::NotDraining:
+                os << "NotDraining";
+                break;
+            case Memory::DrainCurrentInst:
+                os << "DrainCurrentInst";
+                break;
+            case Memory::DrainHaltFetch:
+                os << "DrainHaltFetch";
+                break;
+            case Memory::DrainAllInsts:
+                os << "DrainAllInsts";
+                break;
+            default:
+                os << "Drain-" << static_cast<int>(state);
+                break;
+            }
+
+            return os;
         }
 
     } // namespace minor

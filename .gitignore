@@ -39,5 +39,11 @@ configs/dram/lowp_sweep.cfg
 .pyenv
 .vscode
 /cov-out
-/cov.zip
-/coverage.info
+*.zip
+/htmlout
+MinorCpu/
+MinorTrace/
+test_progs/
+/*.info
+Doxyfile
+docs/

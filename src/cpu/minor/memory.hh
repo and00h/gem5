@@ -127,6 +127,8 @@ namespace gem5
       std::vector<MemoryThreadInfo>
           memoryInfo;
 
+      std::vector<Scoreboard> &scoreboard;
+
       ThreadID interruptPriority;
       ThreadID issuePriority;
       ThreadID commitPriority;
@@ -193,6 +195,7 @@ namespace gem5
              Latch<ForwardInstData>::Input out_,
              Latch<BranchData>::Input branch_out_,
              Latch<BranchData>::Output branch_in_,
+             std::vector<Scoreboard> &scoreboard_,
              std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer);
       ~Memory();
 
