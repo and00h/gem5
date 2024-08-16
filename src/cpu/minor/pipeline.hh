@@ -48,7 +48,7 @@
 #include "cpu/minor/activity.hh"
 #include "cpu/minor/cpu.hh"
 #include "cpu/minor/writeback.hh"
-// #include "cpu/minor/memory.hh"
+#include "cpu/minor/memory.hh"
 #include "cpu/minor/decode.hh"
 #include "cpu/minor/execute.hh"
 #include "cpu/minor/fetch1.hh"
@@ -91,11 +91,14 @@ namespace gem5
 
       Latch<ForwardInstData> eToW;
       Latch<BranchData> eToW_branch;
+
       Latch<ForwardInstData> eToM;
+      Latch<BranchData> eToM_branch;
+      Latch<BranchData> mToF1_branch;
       Latch<ForwardInstData> mToW;
 
       Writeback writeback;
-      //    MEM mem;
+      Memory memory;
       Execute execute;
       Decode decode;
       // Fetch2 fetch2;

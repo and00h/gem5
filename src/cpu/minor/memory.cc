@@ -25,7 +25,6 @@ namespace gem5
                        Latch<ForwardInstData>::Input out_,
                        Latch<BranchData>::Input branch_out_,
                        Latch<BranchData>::Output branch_in_,
-                       std::vector<Scoreboard> &scoreboard_,
                        std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer)
             : Named(name_),
               inp(inp_),
@@ -33,11 +32,11 @@ namespace gem5
               branch_out(branch_out_),
               branch_in(branch_in_),
               cpu(cpu_),
-              issueLimit(1),
-              memoryIssueLimit(1),
-              commitLimit(1),
-              memoryCommitLimit(1),
-              scoreboard(scoreboard_),
+              memoryInfo(params.numThreads, MemoryThreadInfo(params.executeCommitLimit)),
+              issueLimit(2),
+              memoryIssueLimit(2),
+              commitLimit(2),
+              memoryCommitLimit(2),
               nextStageReserve(next_stage_input_buffer),
               outputWidth(1),
               processMoreThanOneInput(false),
@@ -446,16 +445,10 @@ namespace gem5
             unsigned int num_insts_committed = 0;
             unsigned int num_mem_refs_committed = 0;
 
-            while (!mem_info.inFlightInsts->empty() &&
-                   !branch.isStreamChange() &&
-                   fault == NoFault &&
-                   completed_inst &&
-                   num_insts_committed != commitLimit)
+            if (mem_info.inFlightInst)
             {
-
-                QueuedInst *head_inflight_inst = &(mem_info.inFlightInsts->front());
-                InstSeqNum head_exec_seq_num = head_inflight_inst->inst->id.execSeqNum;
-                MinorDynInstPtr inst = head_inflight_inst->inst;
+                MinorDynInstPtr inst = mem_info.inFlightInst;
+                InstSeqNum head_exec_seq_num = inst->id.execSeqNum;
 
                 bool committed_inst = false;
                 bool discard_inst = false;
@@ -478,7 +471,7 @@ namespace gem5
                     discard_inst = inst->id.streamSeqNum != mem_info.streamSeqNum || discard;
                     tryToHandleMemResponses(mem_info, discard_inst, committed_inst, completed_mem_ref, completed_inst, inst, mem_response, branch, fault);
                 }
-                else if (!mem_info.inFlightInsts->empty())
+                else if (mem_info.inFlightInst)
                 {
                     bool try_to_commit = false;
                     discard_inst = inst->id.streamSeqNum != mem_info.streamSeqNum || discard;
@@ -613,8 +606,8 @@ namespace gem5
 
                 /* Finished with the inst, remove it from the inst queue and
                  *  clear its dependencies */
-                mem_info.inFlightInsts->pop();
-
+                // mem_info.inFlightInsts->pop();
+                mem_info.inFlightInst = nullptr;
                 // MOVETO: Memory
                 /* Complete barriers in the LSQ/move to store buffer */
                 if (inst->isInst() && inst->staticInst->isFullMemBarrier())
@@ -626,6 +619,7 @@ namespace gem5
                 }
                 if (inst->isMemRef() || inst->staticInst->isFullMemBarrier())
                 {
+                    auto scoreboard = cpu.getScoreboard();
                     scoreboard[thread_id].clearInstDests(inst, inst->isMemRef());
                 }
             }
@@ -692,7 +686,7 @@ namespace gem5
         {
             const ForwardInstData *insts_in = getInput(tid);
             MemoryThreadInfo &mem_info = memoryInfo[tid];
-            if (!insts_in)
+            if (!insts_in || mem_info.inFlightInst)
             {
                 return false;
             }
@@ -758,51 +752,101 @@ namespace gem5
 
         void Memory::attemptCommit(ThreadID commit_tid, ForwardInstData &insts_out, unsigned int *output_index, BranchData &branch, bool interrupted)
         {
-            MemoryThreadInfo &mem_info = memoryInfo[commit_tid];
-            LSQ &lsq = cpu.getLSQ();
-            ThreadContext *thread = cpu.getContext(commit_tid);
-
-            bool completed_inst = true;
-            bool committed_inst = false;
-            bool completed_mem_ref = false;
-            bool issued_mem_ref = false;
-            Fault fault = NoFault;
-            MinorDynInstPtr inst = mem_info.inFlightInst;
-
-            if (inst && !branch.isStreamChange() && fault == NoFault && !interrupted)
+            if (commit_tid != InvalidThreadID)
             {
-                DPRINTF(MinorMemory, "Trying to pass inst %s\n", *inst);
+                MemoryThreadInfo &commit_info = memoryInfo[commit_tid];
 
-                bool discard_inst = inst->id.streamSeqNum != mem_info.streamSeqNum;
-                if (!discard_inst)
+                DPRINTF(MinorExecute, "Attempting to commit [tid:%d]\n",
+                        commit_tid);
+                /* commit can set stalled flags observable to issue and so *must* be
+                 *  called first */
+                if (commit_info.drainState != NotDraining)
                 {
-                    completed_inst = commitInst(inst, insts_out, output_index, false, branch, fault, issued_mem_ref);
+                    if (commit_info.drainState == DrainCurrentInst)
+                    {
+                        /* Commit only micro-ops, don't kill anything else */
+                        sendOutput(commit_tid, insts_out, output_index, true, false, branch);
+
+                        if (isInbetweenInsts(commit_tid))
+                            setDrainState(commit_tid, DrainHaltFetch);
+
+                        /* Discard any generated branch */
+                        branch = BranchData::bubble();
+                    }
+                    else if (commit_info.drainState == DrainAllInsts)
+                    {
+                        /* Kill all instructions */
+                        while (getInput(commit_tid))
+                            popInput(commit_tid);
+                        sendOutput(commit_tid, insts_out, output_index, false, true, branch);
+                    }
                 }
                 else
                 {
-                    completed_inst = true;
-                    inst->committed = true;
+                    /* Commit micro-ops only if interrupted.  Otherwise, commit
+                     *  anything you like */
+                    DPRINTF(MinorExecute, "Committing micro-ops for interrupt[tid:%d]\n",
+                            commit_tid);
+                    sendOutput(commit_tid, insts_out, output_index, false, false, branch);
+                }
+
+                /* Halt fetch, but don't do it until we have the current instruction in
+                 *  the bag */
+                if (commit_info.drainState == DrainHaltFetch)
+                {
+                    updateBranchData(commit_tid, BranchData::HaltFetch,
+                                     MinorDynInst::bubble(),
+                                     cpu.getContext(commit_tid)->pcState(), branch);
+
+                    cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
+                    setDrainState(commit_tid, DrainAllInsts);
                 }
             }
-            else
-            {
-                DPRINTF(MinorMemory, "No inflight insts\n");
-                completed_inst = false;
-            }
-            if (issued_mem_ref)
-            {
-                inst->inLSQ = true;
-            }
-            if (completed_inst && fault == NoFault)
-            {
-                finalizeCompletedInstruction(commit_tid, inst, mem_info, fault, issued_mem_ref, committed_inst);
-            }
-            if (isInbetweenInsts(commit_tid) && tryPCEvents(commit_tid))
-            {
-                ThreadContext *thread = cpu.getContext(commit_tid);
-                updateBranchData(commit_tid, BranchData::UnpredictedBranch,
-                                 MinorDynInst::bubble(), thread->pcState(), branch);
-            }
+            // MemoryThreadInfo &mem_info = memoryInfo[commit_tid];
+            // LSQ &lsq = cpu.getLSQ();
+            // ThreadContext *thread = cpu.getContext(commit_tid);
+            //
+            // bool completed_inst = true;
+            // bool committed_inst = false;
+            // bool completed_mem_ref = false;
+            // bool issued_mem_ref = false;
+            // Fault fault = NoFault;
+            // MinorDynInstPtr inst = mem_info.inFlightInst;
+            //
+            // if (inst && !branch.isStreamChange() && fault == NoFault && !interrupted)
+            //{
+            //    DPRINTF(MinorMemory, "Trying to pass inst %s\n", *inst);
+            //
+            //    bool discard_inst = inst->id.streamSeqNum != mem_info.streamSeqNum;
+            //    if (!discard_inst)
+            //    {
+            //        completed_inst = commitInst(inst, insts_out, output_index, false, branch, fault, issued_mem_ref);
+            //    }
+            //    else
+            //    {
+            //        completed_inst = true;
+            //        inst->committed = true;
+            //    }
+            //}
+            // else
+            //{
+            //    DPRINTF(MinorMemory, "No inflight insts\n");
+            //    completed_inst = false;
+            //}
+            // if (issued_mem_ref)
+            //{
+            //    inst->inLSQ = true;
+            //}
+            // if (completed_inst && fault == NoFault)
+            //{
+            //    finalizeCompletedInstruction(commit_tid, inst, mem_info, fault, issued_mem_ref, committed_inst);
+            //}
+            // if (isInbetweenInsts(commit_tid) && tryPCEvents(commit_tid))
+            //{
+            //    ThreadContext *thread = cpu.getContext(commit_tid);
+            //    updateBranchData(commit_tid, BranchData::UnpredictedBranch,
+            //                     MinorDynInst::bubble(), thread->pcState(), branch);
+            //}
         }
 
         void
@@ -840,8 +884,8 @@ namespace gem5
             {
                 if (commit_tid != InvalidThreadID)
                 {
-                    bool issued = attemptIssue(commit_tid);
-                    if (issued)
+                    bool issued = attemptIssue(issue_tid);
+                    if (memoryInfo[commit_tid].inFlightInst)
                     {
                         attemptCommit(commit_tid, insts_out, &output_index, br_out, interrupted);
                     }
@@ -849,7 +893,7 @@ namespace gem5
                 // TODO: Memory issue
             }
 
-            bool need_to_tick = false;
+            bool need_to_tick = lsq.needsToTick();
             for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
             {
                 need_to_tick = need_to_tick || getInput(tid);
@@ -863,7 +907,13 @@ namespace gem5
 
             /* Wake up if we need to tick again */
             if (need_to_tick)
-                cpu.wakeupOnEvent(Pipeline::WritebackStageId);
+                cpu.wakeupOnEvent(Pipeline::MemoryStageId);
+            if (!insts_out.isBubble())
+            {
+                cpu.activityRecorder->activity();
+                insts_out.threadId = commit_tid;
+                nextStageReserve[commit_tid].reserve();
+            }
 
             /* Make sure the input (if any left) is pushed */
             if (!inp.outputWire->isBubble())
@@ -1011,6 +1061,21 @@ namespace gem5
             }
 
             return true;
+        }
+        void
+        Memory::minorTrace() const
+        {
+            std::ostringstream insts;
+            std::ostringstream stalled;
+
+            memoryInfo[0].instsBeingCommitted.reportData(insts);
+            inputBuffer[0].minorTrace();
+
+            /* Report functional unit stalling in one string */
+            minor::minorTrace("insts=%s inputIndex=%d streamSeqNum=%d"
+                              " stalled=%s drainState=%d isInbetweenInsts=%d\n",
+                              insts.str(), memoryInfo[0].inputIndex, memoryInfo[0].streamSeqNum,
+                              stalled.str(), memoryInfo[0].drainState, isInbetweenInsts(0));
         }
 
         Memory::~Memory()

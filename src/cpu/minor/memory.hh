@@ -106,16 +106,15 @@ namespace gem5
                                                          streamSeqNum(InstId::firstStreamSeqNum),
                                                          lastPredictionSeqNum(InstId::firstPredictionSeqNum),
                                                          drainState(NotDraining) {}
-        MemoryThreadInfo(MemoryThreadInfo &other) : lastCommitWasEndOfMacroop(other.lastCommitWasEndOfMacroop),
-                                                    inputIndex(other.inputIndex),
-                                                    instsBeingCommitted(other.instsBeingCommitted),
-                                                    streamSeqNum(other.streamSeqNum),
-                                                    lastPredictionSeqNum(other.lastPredictionSeqNum),
-                                                    drainState(other.drainState) {}
+        MemoryThreadInfo(const MemoryThreadInfo &other) : lastCommitWasEndOfMacroop(other.lastCommitWasEndOfMacroop),
+                                                          inputIndex(other.inputIndex),
+                                                          instsBeingCommitted(other.instsBeingCommitted),
+                                                          streamSeqNum(other.streamSeqNum),
+                                                          lastPredictionSeqNum(other.lastPredictionSeqNum),
+                                                          drainState(other.drainState) {}
         Queue<QueuedInst, ReportTraitsAdaptor<QueuedInst>> *inFlightInsts;
         Queue<QueuedInst, ReportTraitsAdaptor<QueuedInst>> *inMemInsts;
         MinorDynInstPtr inFlightInst;
-
         bool lastCommitWasEndOfMacroop;
         unsigned int inputIndex;
         ForwardInstData instsBeingCommitted;
@@ -126,8 +125,6 @@ namespace gem5
 
       std::vector<MemoryThreadInfo>
           memoryInfo;
-
-      std::vector<Scoreboard> &scoreboard;
 
       ThreadID interruptPriority;
       ThreadID issuePriority;
@@ -195,7 +192,6 @@ namespace gem5
              Latch<ForwardInstData>::Input out_,
              Latch<BranchData>::Input branch_out_,
              Latch<BranchData>::Output branch_in_,
-             std::vector<Scoreboard> &scoreboard_,
              std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer);
       ~Memory();
 

@@ -1731,12 +1731,12 @@ namespace gem5
             ForwardInstData &insts_out = *out_insts.inputWire;
             unsigned int output_index = 0;
 
-            LSQ &lsq = cpu.getLSQ();
+            // LSQ &lsq = cpu.getLSQ();
             unsigned int num_issued = 0;
 
             /* Do all the cycle-wise activities for dcachePort here to potentially
              *  free up input spaces in the LSQ's requests queue */
-            lsq.step(); // MOVETO: MEMORY
+            // lsq.step(); // MOVETO: MEMORY
 
             /* Check interrupts first.  Will halt commit if interrupt found */
             bool interrupted = false;
@@ -1781,23 +1781,21 @@ namespace gem5
              * advanced */
             advanceFunctionalUnits(next_issuable_insts, becoming_stalled, can_issue_next);
 
-            bool head_inst_might_commit = headInstMightCommit(lsq);
+            bool head_inst_might_commit = headInstMightCommit();
 
-            DPRINTF(Activity, "Need to tick num issued insts: %s%s%s%s%s%s\n",
+            DPRINTF(Activity, "Need to tick num issued insts: %s%s%s%s%s\n",
                     (num_issued != 0 ? " (issued some insts)" : ""),
                     (becoming_stalled ? "(becoming stalled)" : "(not becoming stalled)"),
                     (can_issue_next ? " (can issued next inst)" : ""),
                     (head_inst_might_commit ? "(head inst might commit)" : ""),
-                    (lsq.needsToTick() ? " (LSQ needs to tick)" : ""),
                     (interrupted ? " (interrupted)" : ""));
 
             bool need_to_tick =
-                num_issued != 0 ||                                   /* Issued some insts this cycle */
-                !becoming_stalled ||                                 /* Some FU pipelines can still move */
-                can_issue_next ||                                    /* Can still issue a new inst */
-                head_inst_might_commit ||                            /* Could possible commit the next inst */
-                lsq.needsToTick() || /* Must step the dcache port */ // MOVETO:MEMORY
-                interrupted;                                         /* There are pending interrupts */
+                num_issued != 0 ||        /* Issued some insts this cycle */
+                !becoming_stalled ||      /* Some FU pipelines can still move */
+                can_issue_next ||         /* Can still issue a new inst */
+                head_inst_might_commit || /* Could possible commit the next inst */
+                interrupted;              /* There are pending interrupts */
 
             if (!need_to_tick)
             {
@@ -2192,7 +2190,7 @@ namespace gem5
             }
         }
 
-        bool Execute::headInstMightCommit(LSQ &lsq)
+        bool Execute::headInstMightCommit()
         {
             bool head_inst_might_commit = false;
 
@@ -2211,8 +2209,7 @@ namespace gem5
                     {
                         FUPipeline *fu = funcUnits[head_inst.inst->fuIndex];
                         if ((fu->stalled &&
-                             fu->front().inst->id == head_inst.inst->id) ||
-                            lsq.findResponse(head_inst.inst))
+                             fu->front().inst->id == head_inst.inst->id))
                         {
                             head_inst_might_commit = true;
                             break;

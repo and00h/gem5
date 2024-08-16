@@ -402,7 +402,7 @@ namespace gem5
       // Execute::evaluate();
       bool checkForIssuableInsts(std::vector<MinorDynInstPtr> &next_issuable_insts);
       void advanceFunctionalUnits(std::vector<MinorDynInstPtr> &next_issuable_insts, bool &becoming_stalled, bool &can_issue_next);
-      bool headInstMightCommit(LSQ &lsq);
+      bool headInstMightCommit();
       void attemptCommit(ThreadID commit_tid, ForwardInstData &insts_out, unsigned int *output_index, BranchData &branch, bool interrupted);
 
       // Execute::commit()
