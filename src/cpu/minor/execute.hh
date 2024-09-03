@@ -74,7 +74,7 @@ namespace gem5
       /** Input port carrying stream changes to Fetch1 */
       Latch<BranchData>::Input out;
       Latch<BranchData>::Input branch_out_wb;
-
+      Latch<BranchData>::Input branch_out_mem;
       Latch<ForwardInstData>::Input out_insts;
 
       /** Pointer back to the containing CPU */
@@ -162,7 +162,8 @@ namespace gem5
                                                           instsBeingCommitted(insts_committed),
                                                           streamSeqNum(InstId::firstStreamSeqNum),
                                                           lastPredictionSeqNum(InstId::firstPredictionSeqNum),
-                                                          drainState(NotDraining)
+                                                          drainState(NotDraining),
+                                                          blocked(false)
         {
         }
 
@@ -171,7 +172,8 @@ namespace gem5
                                                             instsBeingCommitted(other.instsBeingCommitted),
                                                             streamSeqNum(other.streamSeqNum),
                                                             lastPredictionSeqNum(other.lastPredictionSeqNum),
-                                                            drainState(other.drainState)
+                                                            drainState(other.drainState),
+                                                            blocked(other.blocked)
         {
         }
 
@@ -207,6 +209,8 @@ namespace gem5
 
         /** State progression for draining NotDraining -> ... -> DrainAllInsts */
         DrainState drainState;
+
+        bool blocked;
       };
 
       std::vector<ExecuteThreadInfo> executeInfo;
@@ -364,7 +368,8 @@ namespace gem5
               Latch<BranchData>::Input out_,
               Latch<BranchData>::Input branch_out_wb_,
               std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer,
-              Latch<ForwardInstData>::Input insts_out_);
+              Latch<ForwardInstData>::Input insts_out_,
+              Latch<BranchData>::Input branch_out_mem_);
 
       ~Execute();
 

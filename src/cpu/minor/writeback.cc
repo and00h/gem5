@@ -423,11 +423,11 @@ namespace gem5
                         DPRINTF(MinorWriteback, "Committing memory reference instruction: %s", *inst);
                     }
 
-                    discard_inst = inst->id.streamSeqNum != wb_info.streamSeqNum;
+                    discard_inst = false; // inst->id.streamSeqNum != wb_info.streamSeqNum;
 
                     /* Is this instruction discardable as its streamSeqNum
                      *  doesn't match? */
-                    if (!discard_inst && !inst->isMemRef())
+                    if (!discard_inst) // && !inst->isMemRef())
                     {
                         /* @todo Think about making lastMemBarrier be
                          *  MAX_UINT_64 to avoid using 0 as a marker value */

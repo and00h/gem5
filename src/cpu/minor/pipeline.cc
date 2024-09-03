@@ -82,7 +82,7 @@ namespace gem5
                                                                                          mToW.output(), eToF1.input(), eToW_branch.output()), // TODO change branch latch
                                                                                memory(cpu.name() + ".memory", cpu, params, eToM.output(), mToW.input(), eToF1.input(), eToM_branch.output(), writeback.inputBuffer),
                                                                                execute(cpu.name() + ".execute", cpu, params,
-                                                                                       dToE.output(), eToF1.input(), eToW_branch.input(), memory.inputBuffer, eToM.input()),
+                                                                                       dToE.output(), eToF1.input(), eToW_branch.input(), memory.inputBuffer, eToM.input(), eToM_branch.input()),
                                                                                lsq(cpu.name() + ".lsq", cpu.name() + ".dcache_port",
                                                                                    cpu_, *this,
                                                                                    params.executeMaxAccessesInMemory,
@@ -247,7 +247,7 @@ namespace gem5
         MinorCPU::MinorCPUPort &
         Pipeline::getDataPort()
         {
-            return execute.getDcachePort();
+            return memory.getDcachePort();
         }
 
         void

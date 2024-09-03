@@ -56,36 +56,36 @@
 namespace gem5
 {
 
-GEM5_DEPRECATED_NAMESPACE(Minor, minor);
-namespace minor
-{
+  GEM5_DEPRECATED_NAMESPACE(Minor, minor);
+  namespace minor
+  {
 
-/** Forward declared to break the cyclic inclusion dependencies between
- *  pipeline and cpu */
-class Pipeline;
-class LSQ;
-class Scoreboard;
+    /** Forward declared to break the cyclic inclusion dependencies between
+     *  pipeline and cpu */
+    class Pipeline;
+    class LSQ;
+    class Scoreboard;
 
-/** Minor will use the SimpleThread state for now */
-typedef SimpleThread MinorThread;
+    /** Minor will use the SimpleThread state for now */
+    typedef SimpleThread MinorThread;
 
-} // namespace minor
+  } // namespace minor
 
-/**
- *  MinorCPU is an in-order CPU model with four fixed pipeline stages:
- *
- *  Fetch1 - fetches lines from memory
- *  Fetch2 - decomposes lines into macro-op instructions
- *  Decode - decomposes macro-ops into micro-ops
- *  Execute - executes those micro-ops
- *
- *  This pipeline is carried in the MinorCPU::pipeline object.
- *  The exec_context interface is not carried by MinorCPU but by
- *      minor::ExecContext objects
- *  created by minor::Execute.
- */
-class MinorCPU : public BaseCPU
-{
+  /**
+   *  MinorCPU is an in-order CPU model with four fixed pipeline stages:
+   *
+   *  Fetch1 - fetches lines from memory
+   *  Fetch2 - decomposes lines into macro-op instructions
+   *  Decode - decomposes macro-ops into micro-ops
+   *  Execute - executes those micro-ops
+   *
+   *  This pipeline is carried in the MinorCPU::pipeline object.
+   *  The exec_context interface is not carried by MinorCPU but by
+   *      minor::ExecContext objects
+   *  created by minor::Execute.
+   */
+  class MinorCPU : public BaseCPU
+  {
   protected:
     /** pipeline is a container for the clockable pipeline stage objects.
      *  Elements of pipeline call TheISA to implement the model. */
@@ -107,21 +107,22 @@ class MinorCPU : public BaseCPU
      *  classes are created by Fetch1 and Execute */
     class MinorCPUPort : public RequestPort
     {
-      public:
-        /** The enclosing cpu */
-        MinorCPU &cpu;
+    public:
+      /** The enclosing cpu */
+      MinorCPU &cpu;
 
-      public:
-        MinorCPUPort(const std::string& name_, MinorCPU &cpu_)
-            : RequestPort(name_, &cpu_), cpu(cpu_)
-        { }
-
+    public:
+      MinorCPUPort(const std::string &name_, MinorCPU &cpu_)
+          : RequestPort(name_, &cpu_), cpu(cpu_)
+      {
+      }
     };
 
     /** Thread Scheduling Policy (RoundRobin, Random, etc) */
     enums::ThreadPolicy threadPolicy;
+
   protected:
-     /** Return a reference to the data port. */
+    /** Return a reference to the data port. */
     Port &getDataPort() override;
 
     /** Return a reference to the instruction port. */
@@ -137,7 +138,7 @@ class MinorCPU : public BaseCPU
     void init() override;
     void startup() override;
     void wakeup(ThreadID tid) override;
-
+    bool isMemoryExecuting(ThreadID tid) const;
     /** Processor-specific statistics */
     minor::MinorStats stats;
 
@@ -174,24 +175,26 @@ class MinorCPU : public BaseCPU
     /** Thread scheduling utility functions */
     std::vector<ThreadID> roundRobinPriority(ThreadID priority)
     {
-        std::vector<ThreadID> prio_list;
-        for (ThreadID i = 1; i <= numThreads; i++) {
-            prio_list.push_back((priority + i) % numThreads);
-        }
-        return prio_list;
+      std::vector<ThreadID> prio_list;
+      for (ThreadID i = 1; i <= numThreads; i++)
+      {
+        prio_list.push_back((priority + i) % numThreads);
+      }
+      return prio_list;
     }
 
     std::vector<ThreadID> randomPriority()
     {
-        std::vector<ThreadID> prio_list;
-        for (ThreadID i = 0; i < numThreads; i++) {
-            prio_list.push_back(i);
-        }
+      std::vector<ThreadID> prio_list;
+      for (ThreadID i = 0; i < numThreads; i++)
+      {
+        prio_list.push_back(i);
+      }
 
-        std::shuffle(prio_list.begin(), prio_list.end(),
-                     random_mt.gen);
+      std::shuffle(prio_list.begin(), prio_list.end(),
+                   random_mt.gen);
 
-        return prio_list;
+      return prio_list;
     }
 
     /** The tick method in the MinorCPU is simply updating the cycle
@@ -207,9 +210,9 @@ class MinorCPU : public BaseCPU
     void wakeupOnEvent(unsigned int stage_id);
     EventFunctionWrapper *fetchEventWrapper;
 
-    minor::LSQ& getLSQ();
-    std::vector<minor::Scoreboard>& getScoreboard();
-};
+    minor::LSQ &getLSQ();
+    std::vector<minor::Scoreboard> &getScoreboard();
+  };
 
 } // namespace gem5
 

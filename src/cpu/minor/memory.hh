@@ -105,13 +105,15 @@ namespace gem5
                                                          instsBeingCommitted(insts_committed),
                                                          streamSeqNum(InstId::firstStreamSeqNum),
                                                          lastPredictionSeqNum(InstId::firstPredictionSeqNum),
-                                                         drainState(NotDraining) {}
+                                                         drainState(NotDraining),
+                                                         blocked(false) {}
         MemoryThreadInfo(const MemoryThreadInfo &other) : lastCommitWasEndOfMacroop(other.lastCommitWasEndOfMacroop),
                                                           inputIndex(other.inputIndex),
                                                           instsBeingCommitted(other.instsBeingCommitted),
                                                           streamSeqNum(other.streamSeqNum),
                                                           lastPredictionSeqNum(other.lastPredictionSeqNum),
-                                                          drainState(other.drainState) {}
+                                                          drainState(other.drainState),
+                                                          blocked(other.blocked) {}
         Queue<QueuedInst, ReportTraitsAdaptor<QueuedInst>> *inFlightInsts;
         Queue<QueuedInst, ReportTraitsAdaptor<QueuedInst>> *inMemInsts;
         MinorDynInstPtr inFlightInst;
@@ -121,10 +123,8 @@ namespace gem5
         InstSeqNum streamSeqNum;
         InstSeqNum lastPredictionSeqNum;
         DrainState drainState;
+        bool blocked;
       };
-
-      std::vector<MemoryThreadInfo>
-          memoryInfo;
 
       ThreadID interruptPriority;
       ThreadID issuePriority;
@@ -195,8 +195,11 @@ namespace gem5
              std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer);
       ~Memory();
 
+      std::vector<MemoryThreadInfo>
+          memoryInfo;
+
     public:
-      MinorCPU::MinorCPUPort &getDcachePort();
+      MinorCPU::MinorCPUPort &getDcachePort() { return cpu.getLSQ().getDcachePort(); };
       LSQ &getLSQ() { return cpu.getLSQ(); };
 
       void evaluate();

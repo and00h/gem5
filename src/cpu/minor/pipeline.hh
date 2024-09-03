@@ -167,7 +167,10 @@ namespace gem5
       bool instIsHeadInst(MinorDynInstPtr inst) { return execute.instIsHeadInst(inst); }
 
       LSQ &getLSQ() { return lsq; }
-
+      bool isMemoryExecuting(ThreadID tid) const
+      {
+        return memory.memoryInfo[tid].inFlightInst;
+      }
       std::vector<Scoreboard> &getScoreboard();
     };
 

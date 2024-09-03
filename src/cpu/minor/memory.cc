@@ -33,10 +33,10 @@ namespace gem5
               branch_in(branch_in_),
               cpu(cpu_),
               memoryInfo(params.numThreads, MemoryThreadInfo(params.executeCommitLimit)),
-              issueLimit(2),
-              memoryIssueLimit(2),
-              commitLimit(2),
-              memoryCommitLimit(2),
+              issueLimit(1),
+              memoryIssueLimit(1),
+              commitLimit(1),
+              memoryCommitLimit(1),
               nextStageReserve(next_stage_input_buffer),
               outputWidth(1),
               processMoreThanOneInput(false),
@@ -414,6 +414,7 @@ namespace gem5
             }
             else if (inst->staticInst->isMemRef())
             {
+                DPRINTF(MinorMemory, "Starting memory ref inst: %s\n", *inst);
                 startMemRefExecution(inst, branch, fault, thread, completed_inst, issued_mem_ref);
             }
             else if (inst->isInst() && inst->staticInst->isFullMemBarrier() &&
@@ -468,13 +469,13 @@ namespace gem5
                 }
                 else if (mem_response && num_mem_refs_committed < memoryCommitLimit)
                 {
-                    discard_inst = inst->id.streamSeqNum != mem_info.streamSeqNum || discard;
+                    discard_inst = discard; // || inst->id.streamSeqNum != mem_info.streamSeqNum;
                     tryToHandleMemResponses(mem_info, discard_inst, committed_inst, completed_mem_ref, completed_inst, inst, mem_response, branch, fault);
                 }
                 else if (mem_info.inFlightInst)
                 {
                     bool try_to_commit = false;
-                    discard_inst = inst->id.streamSeqNum != mem_info.streamSeqNum || discard;
+                    discard_inst = discard; // || inst->id.streamSeqNum != mem_info.streamSeqNum;
                     if (!discard_inst)
                     {
                         if (!inst->isFault() && inst->isMemRef() && lsq.getLastMemBarrier(thread_id) < inst->id.execSeqNum && lsq.getLastMemBarrier(thread_id) != 0)
@@ -708,14 +709,22 @@ namespace gem5
                     issued = true;
                     discarded = true;
                 }
-                else if (inst->id.streamSeqNum != mem_info.streamSeqNum)
+                /*else if (inst->id.streamSeqNum != mem_info.streamSeqNum)
                 {
                     DPRINTF(MinorMemory, "Discarding inst: %s as its stream state was unexpected, expected: %d\n", *inst, mem_info.streamSeqNum);
                     issued = true;
                     discarded = true;
-                }
+                }*/
                 else
                 {
+                    if (inst->staticInst->isMemRef())
+                    {
+                        DPRINTF(MinorMemory, "Issuing memref inst: %s\n", *inst);
+                    }
+                    else
+                    {
+                        DPRINTF(MinorMemory, "Issuing inst: %s\n", *inst);
+                    }
                     mem_info.inFlightInst = inst;
                     issued = true;
                 }
@@ -882,9 +891,13 @@ namespace gem5
             }
             else
             {
+                bool issued = false;
+                if (issue_tid != InvalidThreadID)
+                {
+                    issued = attemptIssue(issue_tid);
+                }
                 if (commit_tid != InvalidThreadID)
                 {
-                    bool issued = attemptIssue(issue_tid);
                     if (memoryInfo[commit_tid].inFlightInst)
                     {
                         attemptCommit(commit_tid, insts_out, &output_index, br_out, interrupted);
@@ -894,10 +907,10 @@ namespace gem5
             }
 
             bool need_to_tick = lsq.needsToTick();
-            for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
-            {
-                need_to_tick = need_to_tick || getInput(tid);
-            }
+            // for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
+            // {
+            // need_to_tick = need_to_tick || getInput(tid);
+            // }
 
             if (!need_to_tick)
             {
@@ -946,19 +959,19 @@ namespace gem5
                 {
                     if (mem_info.inFlightInst->inLSQ)
                     {
-                        if (lsq.findResponse(mem_info.inFlightInst))
+                        if (lsq.findResponse(mem_info.inFlightInst) && !mem_info.blocked)
                         {
                             commitPriority = tid;
                             return tid;
                         }
                     }
-                    else
+                    else if (!mem_info.blocked)
                     {
                         commitPriority = tid;
                         return tid;
                     }
                 }
-                else if (getInput(tid))
+                else if (getInput(tid) && !mem_info.blocked)
                 {
                     commitPriority = tid;
                     return tid;
@@ -990,7 +1003,7 @@ namespace gem5
             {
                 MemoryThreadInfo &mem_info = memoryInfo[tid];
 
-                if (!mem_info.inFlightInst && getInput(tid))
+                if (!mem_info.inFlightInst && getInput(tid) && !mem_info.blocked)
                 {
                     issuePriority = tid;
                     return tid;

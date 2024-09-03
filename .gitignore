@@ -47,3 +47,5 @@ test_progs/
 /*.info
 Doxyfile
 docs/
+gdbscript
+gem5.log

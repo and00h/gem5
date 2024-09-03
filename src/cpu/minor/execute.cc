@@ -69,10 +69,12 @@ namespace gem5
                          Latch<BranchData>::Input out_,
                          Latch<BranchData>::Input branch_out_wb_,
                          std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer,
-                         Latch<ForwardInstData>::Input insts_out_) : Named(name_),
+                         Latch<ForwardInstData>::Input insts_out_,
+                         Latch<BranchData>::Input branch_out_mem_) : Named(name_),
                                                                      inp(inp_),
                                                                      out(out_),
                                                                      branch_out_wb(branch_out_wb_),
+                                                                     branch_out_mem(branch_out_mem_),
                                                                      out_insts(insts_out_),
                                                                      cpu(cpu_),
                                                                      nextStageReserve(next_stage_input_buffer),
@@ -80,7 +82,7 @@ namespace gem5
                                                                      processMoreThanOneInput(false),
                                                                      issueLimit(params.executeIssueLimit),
                                                                      memoryIssueLimit(params.executeMemoryIssueLimit),
-                                                                     commitLimit(params.executeCommitLimit),
+                                                                     commitLimit(1), // params.executeCommitLimit),
                                                                      memoryCommitLimit(params.executeMemoryCommitLimit),
                                                                      fuDescriptions(*params.executeFuncUnits),
                                                                      numFuncUnits(fuDescriptions.funcUnits.size()),
@@ -810,6 +812,11 @@ namespace gem5
                 */}
                 else
                 {
+                    if (inst->isMemRef())
+                    {
+                        DPRINTF(MinorExecute, "Trying to issue mem inst: %s\n",
+                                *inst);
+                    }
                     /* Can insert the instruction into this FU */
                     DPRINTF(MinorExecute, "Issuing inst: %s"
                                           " into FU %d\n",
@@ -1476,6 +1483,7 @@ namespace gem5
                    !branch.isStreamChange() &&        /* No real branch */
                    fault == NoFault &&                /* No faults */
                    completed_inst &&                  /* Still finding instructions to execute */
+                   *output_index < outputWidth &&
                    num_insts_committed != commitLimit /* Not reached commit limit */
             )
             {
@@ -1511,7 +1519,7 @@ namespace gem5
                 bool in_flight_insts = !ex_info.inFlightInsts->empty();
                 bool finished_macroop = only_commit_microops && ex_info.lastCommitWasEndOfMacroop;
 
-                bool can_commit_insts = in_flight_insts && !finished_macroop;
+                bool can_commit_insts = (in_flight_insts || inst->isMemRef()) && !finished_macroop;
 
                 /* Can we find a mem response for this inst */
                 // LSQ::LSQRequestPtr mem_response =
@@ -1727,6 +1735,7 @@ namespace gem5
 
             BranchData &branch = *out.inputWire;
             BranchData &writeback_branch = *branch_out_wb.inputWire;
+            BranchData &memory_branch = *branch_out_mem.inputWire;
 
             ForwardInstData &insts_out = *out_insts.inputWire;
             unsigned int output_index = 0;
@@ -1737,6 +1746,8 @@ namespace gem5
             /* Do all the cycle-wise activities for dcachePort here to potentially
              *  free up input spaces in the LSQ's requests queue */
             // lsq.step(); // MOVETO: MEMORY
+            for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
+                executeInfo[tid].blocked = !nextStageReserve[tid].canReserve() || cpu.isMemoryExecuting(tid);
 
             /* Check interrupts first.  Will halt commit if interrupt found */
             bool interrupted = false;
@@ -1806,9 +1817,9 @@ namespace gem5
             /* Wake up if we need to tick again */
             if (need_to_tick)
                 cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
-
             /* Note activity of following buffer */
             writeback_branch = branch;
+            memory_branch = branch;
             if (!branch.isBubble() || !insts_out.isBubble())
             {
                 cpu.activityRecorder->activity();
@@ -1918,7 +1929,7 @@ namespace gem5
         Execute::getCommittingThread()
         {
             std::vector<ThreadID> priority_list;
-            LSQ &lsq = cpu.getLSQ();
+            // LSQ &lsq = cpu.getLSQ();
             switch (cpu.threadPolicy)
             {
             case enums::SingleThreaded:
@@ -1942,41 +1953,41 @@ namespace gem5
                     QueuedInst *head_inflight_inst = &(ex_info.inFlightInsts->front());
                     MinorDynInstPtr inst = head_inflight_inst->inst;
 
-                    // can_commit_insts = can_commit_insts &&
-                    //    (!inst->inLSQ || (lsq.findResponse(inst) != NULL));
+                    can_commit_insts = can_commit_insts &&
+                                       (!inst->inLSQ); // || (lsq.findResponse(inst) != NULL));
 
-                    if (!inst->inLSQ)
+                    // if (!inst->inLSQ)
+                    // {
+                    bool can_transfer_mem_inst = false;
+                    // if (!ex_info.inFUMemInsts->empty() && lsq.canRequest())
                     {
-                        bool can_transfer_mem_inst = false;
-                        if (!ex_info.inFUMemInsts->empty() && lsq.canRequest())
-                        {
-                            const MinorDynInstPtr head_mem_ref_inst =
-                                ex_info.inFUMemInsts->front().inst;
-                            FUPipeline *fu = funcUnits[head_mem_ref_inst->fuIndex];
-                            const MinorDynInstPtr &fu_inst = fu->front().inst;
-                            can_transfer_mem_inst =
-                                !fu_inst->isBubble() &&
-                                fu_inst->id.threadId == tid &&
-                                !fu_inst->inLSQ &&
-                                fu_inst->canEarlyIssue &&
-                                inst->id.execSeqNum > fu_inst->instToWaitFor;
-                        }
-
-                        bool can_execute_fu_inst = inst->fuIndex == noCostFUIndex;
-                        if (can_commit_insts && !can_transfer_mem_inst &&
-                            inst->fuIndex != noCostFUIndex)
-                        {
-                            QueuedInst &fu_inst = funcUnits[inst->fuIndex]->front();
-                            can_execute_fu_inst = !fu_inst.inst->isBubble() &&
-                                                  fu_inst.inst->id == inst->id;
-                        }
-
-                        can_commit_insts = can_commit_insts &&
-                                           (can_transfer_mem_inst || can_execute_fu_inst);
+                        // const MinorDynInstPtr head_mem_ref_inst =
+                        // ex_info.inFUMemInsts->front().inst;
+                        // FUPipeline *fu = funcUnits[head_mem_ref_inst->fuIndex];
+                        // const MinorDynInstPtr &fu_inst = fu->front().inst;
+                        // can_transfer_mem_inst =
+                        // !fu_inst->isBubble() &&
+                        // fu_inst->id.threadId == tid &&
+                        // !fu_inst->inLSQ &&
+                        // fu_inst->canEarlyIssue &&
+                        // inst->id.execSeqNum > fu_inst->instToWaitFor;
                     }
+
+                    bool can_execute_fu_inst = inst->fuIndex == noCostFUIndex;
+                    if (can_commit_insts && !can_transfer_mem_inst &&
+                        inst->fuIndex != noCostFUIndex)
+                    {
+                        QueuedInst &fu_inst = funcUnits[inst->fuIndex]->front();
+                        can_execute_fu_inst = !fu_inst.inst->isBubble() &&
+                                              fu_inst.inst->id == inst->id;
+                    }
+
+                    can_commit_insts = can_commit_insts &&
+                                       (can_transfer_mem_inst || can_execute_fu_inst);
+                    // }
                 }
 
-                if (can_commit_insts)
+                if (can_commit_insts && !executeInfo[tid].blocked)
                 {
                     commitPriority = tid;
                     return tid;
@@ -2007,7 +2018,7 @@ namespace gem5
 
             for (auto tid : priority_list)
             {
-                if (getInput(tid))
+                if (getInput(tid) && !executeInfo[tid].blocked)
                 {
                     issuePriority = tid;
                     return tid;
