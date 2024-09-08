@@ -76,7 +76,7 @@ namespace gem5
                                                                                              icachePort(name_ + ".icache_port", *this, cpu_),
                                                                                              lineSnap(params.fetch1LineSnapWidth),
                                                                                              maxLineWidth(params.fetch1LineWidth),
-                                                                                             fetchLimit(params.fetch1FetchLimit),
+                                                                                             fetchLimit(1), // params.fetch1FetchLimit),
                                                                                              fetchInfo(params.numThreads),
                                                                                              threadPriority(0),
                                                                                              requests(name_ + ".requests", "lines", params.fetch1FetchLimit),
@@ -819,10 +819,13 @@ namespace gem5
             }
 
             /* Format >>> Log4GUI: fetch1: tick: stall_bit: inst_address: <assembly> */
-            DPRINTF(MinorGUI, "Log4GUI: fetch1: %d: %d: %x: <assembly>\n",
-                    curTick(),
-                    is_stalling,
-                    has_output ? line_out.pc->instAddr() : 0x0);
+            if (has_output)
+            {
+                DPRINTF(MinorGUI, "Log4GUI: fetch1: %d: %d: %x: <assembly>\n",
+                        curTick(),
+                        is_stalling,
+                        line_out.pc->instAddr());
+            }
         }
 
         void

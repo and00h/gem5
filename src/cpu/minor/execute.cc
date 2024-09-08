@@ -801,45 +801,39 @@ namespace gem5
                             DPRINTF(MinorExecute, "Can't issue inst: %s as extra"
                                                   " decoding is suppressing it\n",
                                     *inst);
-                /*} else if (!scoreboard[thread_id].canInstIssue(inst,
-                 *   src_latencies, cant_forward_from_fu_indices,
-                 *   cpu.curCycle(), cpu.getContext(thread_id)))
-                 * {
-                 *   DPRINTF(MinorExecute, "Can't issue inst: %s yet\n",
-                 *   *inst);
-                 * DISABLE AS NOW IT IS DONE IN DECODE STAGE
-                 *    
-                */}
-                else
-                {
-                    if (inst->isMemRef())
-                    {
-                        DPRINTF(MinorExecute, "Trying to issue mem inst: %s\n",
-                                *inst);
-                    }
-                    /* Can insert the instruction into this FU */
-                    DPRINTF(MinorExecute, "Issuing inst: %s"
-                                          " into FU %d\n",
-                            *inst,
-                            fu_index);
+                        }
+                        else
+                        {
+                            if (inst->isMemRef())
+                            {
+                                DPRINTF(MinorExecute, "Trying to issue mem inst: %s\n",
+                                        *inst);
+                            }
+                            /* Can insert the instruction into this FU */
+                            DPRINTF(MinorExecute, "Issuing inst: %s"
+                                                  " into FU %d\n",
+                                    *inst,
+                                    fu_index);
 
-                    insertIntoFU(thread_id, inst, timing, fu_index);
-                    issued_mem_ref = inst->isMemRef();
-                    /* And start the countdown on activity to allow
-                     *  this instruction to get to the end of its FU */
-                    cpu.activityRecorder->activity();
+                            insertIntoFU(thread_id, inst, timing, fu_index);
+                            issued_mem_ref = inst->isMemRef();
+                            /* And start the countdown on activity to allow
+                             *  this instruction to get to the end of its FU */
+                            cpu.activityRecorder->activity();
 
-                    /* FORMAT >>> Log4GUI: stage: tick: stall_bit: inst_address:
-                        ...assembly: fu_index*/
-                    DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
-                            curTick(),
-                            0, /* not stalling */
-                            inst->pc->instAddr(),
-                            inst->staticInst->disassemble(inst->pc->instAddr()),
-                            fu_index);
-
-                    issued = true;
-                }
+                            /* FORMAT >>> Log4GUI: stage: tick: stall_bit: inst_address:
+                                ...assembly: fu_index*/
+                            DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
+                                    curTick(),
+                                    0, /* not stalling */
+                                    inst->pc->instAddr(),
+                                    inst->staticInst->disassemble(inst->pc->instAddr()),
+                                    fu_index);
+                            FUPipeline *fu = funcUnits[fu_index];
+                            fu->advance();
+                            DPRINTF(MinorExecute, "Advancing FU[%d]\n", fu_index);
+                            issued = true;
+                        }
                     }
                 }
             }
@@ -851,8 +845,8 @@ namespace gem5
                 DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
                         curTick(),
                         1, /* is stalling */
-                        0x0,
-                        "",
+                        inst->pc->instAddr(),
+                        inst->staticInst->disassemble(inst->pc->instAddr()),
                         -1);
             }
 
@@ -860,7 +854,7 @@ namespace gem5
         }
 
         unsigned int
-        Execute::issue(ThreadID thread_id)
+        Execute::issue(ThreadID thread_id, unsigned int &fu_idx)
         {
             const ForwardInstData *insts_in = getInput(thread_id);
             ExecuteThreadInfo &thread = executeInfo[thread_id];
@@ -901,6 +895,7 @@ namespace gem5
 
                 if (issued)
                 {
+                    fu_idx = fu_index;
                     /* Handle correctly issued, update simulation statistics */
 
                     /* Generate MinorTrace's MinorInst lines.  Do this at commit
@@ -944,6 +939,7 @@ namespace gem5
                 }
                 else
                 {
+                    fu_idx = -1;
                     DPRINTF(MinorExecute, "Didn't issue inst: %s\n", *inst);
                 }
 
@@ -1203,19 +1199,21 @@ namespace gem5
                  * backwards, so no other branches may evaluate this cycle*/
                 completed_inst = false;
             }
-            // else if (inst->staticInst->isMemRef())
-            // {
-            //     startMemRefExecution(inst, branch, fault, thread, false, completed_inst, issued_mem_ref);
-            // }
-            // else if (inst->isInst() && inst->staticInst->isFullMemBarrier() &&
-            //          !cpu.getLSQ().canPushIntoStoreBuffer())
-            // {
-            //     DPRINTF(MinorExecute, "Can't commit data barrier inst: %s yet as"
-            //                           " there isn't space in the store buffer\n",
-            //             *inst);
+            else if (inst->staticInst->isMemRef())
+            {
+                startMemRefExecution(inst, branch, fault, thread, false, completed_inst, issued_mem_ref);
+                DPRINTF(MinorExecute, "Sending mem inst to MEM: %s\n", *inst);
 
-            //     completed_inst = false;
-            // }
+                packIntoOutput(inst, insts_out, output_index);
+            }
+            else if (inst->isInst() && inst->staticInst->isFullMemBarrier() &&
+                     !cpu.getLSQ().canPushIntoStoreBuffer())
+            {
+                DPRINTF(MinorExecute, "Can't commit data barrier inst: %s yet as"
+                                      " there isn't space in the store buffer\n",
+                        *inst);
+                completed_inst = false;
+            }
             else
             {
                 ExecContext context(cpu, *cpu.threads[thread_id], inst);
@@ -1418,8 +1416,8 @@ namespace gem5
                             *inst, committed_inst);
                     cpu.getLSQ().completeMemBarrierInst(inst, committed_inst);
                 }
-
-                scoreboard[thread_id].clearInstDests(inst, inst->isMemRef());
+                if (!inst->isMemRef())
+                    scoreboard[thread_id].clearInstDests(inst, inst->isMemRef());
             }
         }
 
@@ -1642,7 +1640,6 @@ namespace gem5
                             }
                             else
                             {
-                                bool issued_mem_ref = false;
                                 completed_inst = commitInst(inst, insts_out, output_index,
                                                             false, branch, fault, issued_mem_ref);
                             }
@@ -1753,6 +1750,7 @@ namespace gem5
             bool interrupted = false;
             ThreadID interrupt_tid = checkInterrupts(branch, interrupted);
             ThreadID commit_tid = getCommittingThread();
+            bool becoming_stalled = true;
 
             if (interrupt_tid != InvalidThreadID)
             {
@@ -1768,8 +1766,6 @@ namespace gem5
             }
             else
             {
-                attemptCommit(commit_tid, insts_out, &output_index, branch, interrupted);
-
                 ThreadID issue_tid = getIssuingThread();
                 /* This will issue merrily even when interrupted in the sure and
                  *  certain knowledge that the interrupt with change the stream */
@@ -1777,16 +1773,17 @@ namespace gem5
                 {
                     DPRINTF(MinorExecute, "Attempting to issue [tid:%d]\n",
                             issue_tid);
-                    num_issued = issue(issue_tid);
+                    unsigned int fu_idx = -1;
+                    num_issued = issue(issue_tid, fu_idx);
                 }
+                commit_tid = getCommittingThread();
+                attemptCommit(commit_tid, insts_out, &output_index, branch, interrupted);
             }
 
             /* Run logic to step functional units + decide if we are active on the next
              * clock cycle */
             std::vector<MinorDynInstPtr> next_issuable_insts;
             bool can_issue_next = checkForIssuableInsts(next_issuable_insts);
-
-            bool becoming_stalled = true;
 
             /* Advance the pipelines and note whether they still need to be
              * advanced */
@@ -1815,8 +1812,9 @@ namespace gem5
             }
 
             /* Wake up if we need to tick again */
-            if (need_to_tick)
-                cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
+            cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
+            if (cpu.getLSQ().needsToTick())
+                cpu.wakeupOnEvent(Pipeline::MemoryStageId);
             /* Note activity of following buffer */
             writeback_branch = branch;
             memory_branch = branch;
@@ -1953,11 +1951,6 @@ namespace gem5
                     QueuedInst *head_inflight_inst = &(ex_info.inFlightInsts->front());
                     MinorDynInstPtr inst = head_inflight_inst->inst;
 
-                    can_commit_insts = can_commit_insts &&
-                                       (!inst->inLSQ); // || (lsq.findResponse(inst) != NULL));
-
-                    // if (!inst->inLSQ)
-                    // {
                     bool can_transfer_mem_inst = false;
                     // if (!ex_info.inFUMemInsts->empty() && lsq.canRequest())
                     {
@@ -1984,6 +1977,15 @@ namespace gem5
 
                     can_commit_insts = can_commit_insts &&
                                        (can_transfer_mem_inst || can_execute_fu_inst);
+                    if (can_commit_insts && executeInfo[tid].blocked)
+                    {
+                        DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
+                                curTick(),
+                                1, /* not stalling */
+                                inst->pc->instAddr(),
+                                inst->staticInst->disassemble(inst->pc->instAddr()),
+                                inst->fuIndex);
+                    }
                     // }
                 }
 
@@ -2176,6 +2178,7 @@ namespace gem5
             for (unsigned int i = 0; i < numFuncUnits; i++)
             {
                 FUPipeline *fu = funcUnits[i];
+                DPRINTF(MinorExecute, "Advancing FU[%d]\n", i);
                 fu->advance();
 
                 /* If we need to tick again, the pipeline will have been left or set

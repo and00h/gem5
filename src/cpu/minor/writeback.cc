@@ -53,6 +53,7 @@
 #include "debug/MinorMem.hh"
 #include "debug/MinorTrace.hh"
 #include "debug/PCEvent.hh"
+#include "debug/MinorGUI.hh"
 
 namespace gem5
 {
@@ -463,6 +464,11 @@ namespace gem5
 
                 if (completed_inst)
                 {
+                    DPRINTF(MinorGUI, "Log4GUI: writeback: %d: %d: %x: %s\n",
+                            curTick(),
+                            false,
+                            inst ? inst->pc->instAddr() : 0x0,
+                            inst ? inst->staticInst->disassemble(inst->pc->instAddr()) : "");
                     /* Note that this includes discarded insts */
                     DPRINTF(MinorWriteback, "Completed inst: %s\n", *inst);
 
@@ -541,6 +547,8 @@ namespace gem5
                 DPRINTF(MinorWriteback, "Received an instruction\n");
                 inputBuffer[inp.outputWire->threadId].setTail(*inp.outputWire);
             }
+            bool is_stalling = false;
+            MinorDynInstPtr log_inst = NULL;
             const BranchData &branch_in = *execute_branch.outputWire;
 
             processBranchesFromLaterStages(branch_in);

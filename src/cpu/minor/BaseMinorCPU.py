@@ -155,17 +155,19 @@ class MinorFUPool(SimObject):
 class MinorDefaultIntFU(MinorFU):
     opClasses = minorMakeOpClassSet(["IntAlu"])
     timings = [MinorFUTiming(description="Int", srcRegsRelativeLats=[2])]
-    opLat = 3
+    opLat = 1
+    issueLat = 0
 
 
 class MinorDefaultIntMulFU(MinorFU):
     opClasses = minorMakeOpClassSet(["IntMult"])
     timings = [MinorFUTiming(description="Mul", srcRegsRelativeLats=[0])]
-    opLat = 3
+    opLat = 1
 
 
 class MinorDefaultIntDivFU(MinorFU):
     opClasses = minorMakeOpClassSet(["IntDiv"])
+    timings = [MinorFUTiming(description="Div", srcRegsRelativeLats=[0])]
     issueLat = 9
     opLat = 9
 
@@ -177,10 +179,6 @@ class MinorDefaultFloatSimdFU(MinorFU):
             "FloatCmp",
             "FloatCvt",
             "FloatMisc",
-            "FloatMult",
-            "FloatMultAcc",
-            "FloatDiv",
-            "FloatSqrt",
             "SimdAdd",
             "SimdAddAcc",
             "SimdAlu",
@@ -218,14 +216,41 @@ class MinorDefaultFloatSimdFU(MinorFU):
         ]
     )
 
-    timings = [MinorFUTiming(description="FloatSimd", srcRegsRelativeLats=[2])]
+    timings = [
+        MinorFUTiming(description="FloatAddSimd", srcRegsRelativeLats=[2])
+    ]
+    opLat = 3
+
+
+class MinorDefaultFloatMulFU(MinorFU):
+    opClasses = minorMakeOpClassSet(
+        [
+            "FloatMult",
+            "FloatMultAcc",
+        ]
+    )
+
+    timings = [MinorFUTiming(description="FloatMul", srcRegsRelativeLats=[1])]
+    opLat = 6
+
+
+class MinorDefaultFloatDivFU(MinorFU):
+    opClasses = minorMakeOpClassSet(
+        [
+            "FloatDiv",
+            "FloatSqrt",
+        ]
+    )
+
+    timings = [MinorFUTiming(description="FloatDiv", srcRegsRelativeLats=[1])]
+    issueLat = 6
     opLat = 6
 
 
 class MinorDefaultPredFU(MinorFU):
     opClasses = minorMakeOpClassSet(["SimdPredAlu"])
     timings = [MinorFUTiming(description="Pred", srcRegsRelativeLats=[2])]
-    opLat = 3
+    opLat = 1
 
 
 class MinorDefaultMemFU(MinorFU):
@@ -234,7 +259,7 @@ class MinorDefaultMemFU(MinorFU):
     )
     timings = [
         MinorFUTiming(
-            description="Mem", srcRegsRelativeLats=[1], extraAssumedLat=2
+            description="Mem", srcRegsRelativeLats=[1], extraAssumedLat=0
         )
     ]
     opLat = 1
@@ -248,10 +273,11 @@ class MinorDefaultMiscFU(MinorFU):
 class MinorDefaultFUPool(MinorFUPool):
     funcUnits = [
         MinorDefaultIntFU(),
-        MinorDefaultIntFU(),
         MinorDefaultIntMulFU(),
         MinorDefaultIntDivFU(),
         MinorDefaultFloatSimdFU(),
+        MinorDefaultFloatMulFU(),
+        MinorDefaultFloatDivFU(),
         MinorDefaultPredFU(),
         MinorDefaultMemFU(),
         MinorDefaultMiscFU(),

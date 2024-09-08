@@ -295,7 +295,7 @@ namespace gem5
                                unsigned int &fu_index, bool &discarded, bool &issued_mem_ref);
 
       /** Try and issue instructions from the inputBuffer */
-      unsigned int issue(ThreadID thread_id);
+      unsigned int issue(ThreadID thread_id, unsigned int &fu_idx);
 
       /** Try to act on PC-related events.  Returns true if any were
        *  executed */

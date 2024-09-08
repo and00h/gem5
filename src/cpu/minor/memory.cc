@@ -11,6 +11,7 @@
 #include "debug/Activity.hh"
 #include "debug/PCEvent.hh"
 #include "debug/Drain.hh"
+#include "debug/MinorGUI.hh"
 #include "memory.hh"
 namespace gem5
 {
@@ -412,20 +413,20 @@ namespace gem5
                 // inst->executed = true;
                 // tryToBranch(inst, fault, branch);
             }
-            else if (inst->staticInst->isMemRef())
-            {
-                DPRINTF(MinorMemory, "Starting memory ref inst: %s\n", *inst);
-                startMemRefExecution(inst, branch, fault, thread, completed_inst, issued_mem_ref);
-            }
-            else if (inst->isInst() && inst->staticInst->isFullMemBarrier() &&
-                     !cpu.getLSQ().canPushIntoStoreBuffer())
-            {
-                DPRINTF(MinorMemory, "Can't commit data barrier inst: %s yet as"
-                                     " there isn't space in the store buffer\n",
-                        *inst);
-
-                completed_inst = false;
-            }
+            // else if (inst->staticInst->isMemRef())
+            //{
+            //     DPRINTF(MinorMemory, "Starting memory ref inst: %s\n", *inst);
+            //     startMemRefExecution(inst, branch, fault, thread, completed_inst, issued_mem_ref);
+            // }
+            // else if (inst->isInst() && inst->staticInst->isFullMemBarrier() &&
+            //          !cpu.getLSQ().canPushIntoStoreBuffer())
+            //{
+            //     DPRINTF(MinorMemory, "Can't commit data barrier inst: %s yet as"
+            //                          " there isn't space in the store buffer\n",
+            //             *inst);
+            //
+            //    completed_inst = false;
+            //}
             else
             {
                 DPRINTF(MinorMemory, "Sending instruction to WB: %s\n", *inst);
@@ -471,6 +472,16 @@ namespace gem5
                 {
                     discard_inst = discard; // || inst->id.streamSeqNum != mem_info.streamSeqNum;
                     tryToHandleMemResponses(mem_info, discard_inst, committed_inst, completed_mem_ref, completed_inst, inst, mem_response, branch, fault);
+                    if (!discard_inst)
+                    {
+                        DPRINTF(MinorMemory, "Sending mem instruction to WB: %s\n", *inst);
+                        packIntoOutput(inst, insts_out, output_index);
+                    }
+                    else
+                    {
+                        completed_inst = true;
+                        inst->committed = true;
+                    }
                 }
                 else if (mem_info.inFlightInst)
                 {
@@ -523,7 +534,7 @@ namespace gem5
                     inst->inLSQ = true;
                 }
 
-                if (completed_inst && !(issued_mem_ref && fault == NoFault))
+                if (completed_inst)
                 {
                     finalizeCompletedInstruction(thread_id, inst, mem_info, fault, issued_mem_ref, committed_inst);
                 }
@@ -618,10 +629,9 @@ namespace gem5
                             *inst, committed_inst);
                     cpu.getLSQ().completeMemBarrierInst(inst, committed_inst);
                 }
-                if (inst->isMemRef() || inst->staticInst->isFullMemBarrier())
+                if (inst->isMemRef() /* || inst->staticInst->isFullMemBarrier() */)
                 {
-                    auto scoreboard = cpu.getScoreboard();
-                    scoreboard[thread_id].clearInstDests(inst, inst->isMemRef());
+                    cpu.getScoreboard()[thread_id].clearInstDests(inst, true);
                 }
             }
         }
@@ -864,6 +874,8 @@ namespace gem5
             if (!inp.outputWire->isBubble())
                 inputBuffer[inp.outputWire->threadId].setTail(*inp.outputWire);
 
+            bool is_stalling = false;
+            MinorDynInstPtr log_inst = NULL;
             BranchData &br_in = *branch_in.outputWire;
             BranchData &br_out = *branch_out.inputWire;
 
@@ -895,6 +907,11 @@ namespace gem5
                 if (issue_tid != InvalidThreadID)
                 {
                     issued = attemptIssue(issue_tid);
+                    log_inst = memoryInfo[0].inFlightInst;
+                    if (issued && log_inst->isMemRef())
+                    {
+                        commit_tid = getCommittingThread();
+                    }
                 }
                 if (commit_tid != InvalidThreadID)
                 {
@@ -906,7 +923,7 @@ namespace gem5
                 // TODO: Memory issue
             }
 
-            bool need_to_tick = lsq.needsToTick();
+            bool need_to_tick = lsq.needsToTick() || ::gem5::debug::MinorGUI;
             // for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
             // {
             // need_to_tick = need_to_tick || getInput(tid);
@@ -928,6 +945,23 @@ namespace gem5
                 nextStageReserve[commit_tid].reserve();
             }
 
+            if (log_inst)
+            {
+                DPRINTF(MinorGUI, "Log4GUI: memory: %d: %d: %x: %s\n",
+                        curTick(),
+                        false,
+                        log_inst->pc->instAddr(),
+                        log_inst->staticInst->disassemble(log_inst->pc->instAddr()));
+            }
+            else if (!log_inst && memoryInfo[0].inFlightInst)
+            {
+                cpu.activityRecorder->activity();
+                DPRINTF(MinorGUI, "Log4GUI: memory: %d: %d: %x: %s\n",
+                        curTick(),
+                        true,
+                        memoryInfo[0].inFlightInst->pc->instAddr(),
+                        memoryInfo[0].inFlightInst->staticInst->disassemble(memoryInfo[0].inFlightInst->pc->instAddr()));
+            }
             /* Make sure the input (if any left) is pushed */
             if (!inp.outputWire->isBubble())
                 inputBuffer[inp.outputWire->threadId].pushTail();

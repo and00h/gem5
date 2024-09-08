@@ -49,3 +49,5 @@ Doxyfile
 docs/
 gdbscript
 gem5.log
+gem5_pipeline.log
+configs/common/Caches.py

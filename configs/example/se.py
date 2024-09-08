@@ -229,6 +229,16 @@ if args.simpoint_profile:
         fatal("SimPoint generation not supported with more than one CPUs")
 
 for i in range(np):
+    system.cpu[i].executeInputWidth = 1
+    system.cpu[i].executeInputBufferSize = 1
+    system.cpu[i].decodeInputBufferSize = 1
+    system.cpu[i].executeIssueLimit = 1
+    system.cpu[i].executeMemoryIssueLimit = 1
+    system.cpu[i].decodeToExecuteForwardDelay = 1
+
+    system.cpu[i].enableIdling = False
+    system.cpu[i].fetch1LineWidth = 512
+    system.cpu[i].executeFuncUnits.funcUnits[7].issueLat = 0
     if args.smt:
         system.cpu[i].workload = multiprocesses
     elif len(multiprocesses) == 1:
@@ -274,10 +284,44 @@ if args.ruby:
 else:
     MemClass = Simulation.setMemClass(args)
     system.membus = SystemXBar()
+    system.membus.clk_domain = system.clk_domain
+    system.membus.forward_latency = 1
+    system.membus.frontend_latency = 1
+    system.membus.header_latency = 1
+    system.membus.response_latency = 1
     system.system_port = system.membus.cpu_side_ports
     CacheConfig.config_cache(args, system)
+
     MemConfig.config_mem(args, system)
     config_filesystem(system, args)
+    for memctrl in system.mem_ctrls:
+        memctrl.clk_domain = system.clk_domain
+        memctrl.dram.clk_domain = system.clk_domain
+        memctrl.static_frontend_latency = "0.001ns"
+        memctrl.static_backend_latency = "0.001ns"
+        memctrl.command_window = "0.001ns"
+        #        if isinstance(memctrl.dram, DRAMInterface):
+        memctrl.dram.tREFI = "1000000000000ns"
+        memctrl.dram.tBURST = "0.001ns"
+        memctrl.dram.tRCD = "0.001ns"
+        memctrl.dram.tRCD_WR = "0.001ns"
+        memctrl.dram.tCL = "0.001ns"
+        memctrl.dram.tCWL = "0.001ns"
+        memctrl.dram.tPPD = "0.001ns"
+        memctrl.dram.tRAS = "0.001ns"
+        memctrl.dram.tWR = "0.001ns"
+        memctrl.dram.tRFC = "0.001ns"
+        memctrl.dram.tRP = "0.001ns"
+        memctrl.dram.tRRD = "0.001ns"
+        memctrl.dram.tRTP = "0.001ns"
+        memctrl.dram.tWR = "0.001ns"
+        memctrl.dram.tWTR_L = "0.001ns"
+        memctrl.dram.tXAW = "0.001ns"
+        memctrl.dram.tXP = "0.001ns"
+        memctrl.dram.tXPDLL = "0.001ns"
+        memctrl.dram.tXS = "0.001ns"
+        memctrl.dram.tXSDLL = "0.001ns"
+        memctrl.dram.tCK = "0.001ns"
 
 system.workload = SEWorkload.init_compatible(mp0_path)
 
@@ -285,4 +329,17 @@ if args.wait_gdb:
     system.workload.wait_for_remote_gdb = True
 
 root = Root(full_system=False, system=system)
+for i in range(0, np):
+    system.cpu[i].icache_port.data_latency = "0.001ns"
+    system.cpu[i].icache_port.tag_latency = "0.001ns"
+    system.cpu[i].icache_port.response_latency = "0.001ns"
+    system.cpu[i].dcache_port.data_latency = "0.001ns"
+    system.cpu[i].dcache_port.tag_latency = "0.001ns"
+    system.cpu[i].dcache_port.response_latency = "0.001ns"
+    system.cpu[i].icache_port.clk_domain = system.clk_domain
+    system.cpu[i].dcache_port.clk_domain = system.clk_domain
+    system.cpu[i].icache_port.size = 8388608
+    system.cpu[i].dcache_port.size = 8388608
+    system.cpu[i].dcache_port.peer.clk_domain = system.clk_domain
+    system.cpu[i].icache_port.peer.clk_domain = system.clk_domain
 Simulation.run(args, root, system, FutureClass)

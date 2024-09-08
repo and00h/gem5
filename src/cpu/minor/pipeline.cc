@@ -128,7 +128,6 @@ namespace gem5
                 fatal("%s: decodeToExecuteForwardDelay must be >= 1 (%d)\n",
                       cpu.name(), params.decodeToExecuteForwardDelay);
             }
-
             if (params.executeBranchDelay < 1)
             {
                 fatal("%s: executeBranchDelay must be >= 1\n",
@@ -165,7 +164,6 @@ namespace gem5
         {
             /** We tick the CPU to update the BaseCPU cycle counters */
             cpu.tick();
-
             /* Note that it's important to evaluate the stages in order to allow
              *  'immediate', 0-time-offset TimeBuffer activity to be visible from
              *  later stages to earlier ones in the same cycle */

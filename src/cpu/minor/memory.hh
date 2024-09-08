@@ -131,6 +131,7 @@ namespace gem5
       ThreadID commitPriority;
 
     protected:
+      bool was_stalled;
       friend std::ostream &operator<<(std::ostream &os, DrainState &state);
       const ForwardInstData *getInput(ThreadID tid);
 
