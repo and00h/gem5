@@ -228,6 +228,16 @@ if args.simpoint_profile:
     if np > 1:
         fatal("SimPoint generation not supported with more than one CPUs")
 
+
+def minorMakeOpClassSet(op_classes):
+    """Make a MinorOpClassSet from a list of OpClass enum value strings"""
+
+    def boxOpClass(op_class):
+        return MinorOpClass(opClass=op_class)
+
+    return MinorOpClassSet(opClasses=[boxOpClass(o) for o in op_classes])
+
+
 for i in range(np):
     system.cpu[i].executeInputWidth = 1
     system.cpu[i].executeInputBufferSize = 1
@@ -238,7 +248,31 @@ for i in range(np):
 
     system.cpu[i].enableIdling = False
     system.cpu[i].fetch1LineWidth = 512
-    system.cpu[i].executeFuncUnits.funcUnits[7].issueLat = 0
+    system.cpu[i].executeFuncUnits.funcUnits[0].issueLat = 0
+    system.cpu[i].executeFuncUnits.funcUnits[0].timings = [
+        MinorFUTiming(
+            description="Int",
+            opClasses=minorMakeOpClassSet(["IntAlu"]),
+            srcRegsRelativeLats=[0],
+        ),
+        MinorFUTiming(
+            description="Mem",
+            opClasses=minorMakeOpClassSet(
+                ["MemRead", "MemWrite", "FloatMemRead", "FloatMemWrite"]
+            ),
+            srcRegsRelativeLats=[1],
+            extraAssumedLat=0,
+        ),
+    ]
+    system.cpu[i].executeFuncUnits.funcUnits[5].cantForwardFromFUIndices = [4]
+    system.cpu[i].executeFuncUnits.funcUnits[5].timings[
+        0
+    ].srcRegsRelativeLats = [0]
+    system.cpu[i].executeFuncUnits.funcUnits[4].cantForwardFromFUIndices = [5]
+    system.cpu[i].executeFuncUnits.funcUnits[4].timings[
+        0
+    ].srcRegsRelativeLats = [0]
+
     if args.smt:
         system.cpu[i].workload = multiprocesses
     elif len(multiprocesses) == 1:

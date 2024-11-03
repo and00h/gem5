@@ -774,12 +774,12 @@ namespace gem5
 
                         /* FORMAT >>> Log4GUI: stage: tick: stall_bit: inst_address:
                             ...assembly: fu_index*/
-                        DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
-                                curTick(),
-                                0, /* not stalling */
-                                inst->pc->instAddr(),
-                                inst->staticInst->disassemble(inst->pc->instAddr()),
-                                -1);
+                        // DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
+                        //         curTick(),
+                        //         0, /* not stalling */
+                        //         inst->pc->instAddr(),
+                        //         inst->staticInst->disassemble(inst->pc->instAddr()),
+                        //         -1);
 
                         issued = true;
                     }
@@ -823,12 +823,12 @@ namespace gem5
 
                             /* FORMAT >>> Log4GUI: stage: tick: stall_bit: inst_address:
                                 ...assembly: fu_index*/
-                            DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
-                                    curTick(),
-                                    0, /* not stalling */
-                                    inst->pc->instAddr(),
-                                    inst->staticInst->disassemble(inst->pc->instAddr()),
-                                    fu_index);
+                            // DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
+                            //         curTick(),
+                            //         0, /* not stalling */
+                            //         inst->pc->instAddr(),
+                            //         inst->staticInst->disassemble(inst->pc->instAddr()),
+                            //         fu_index);
                             FUPipeline *fu = funcUnits[fu_index];
                             fu->advance();
                             DPRINTF(MinorExecute, "Advancing FU[%d]\n", fu_index);
@@ -1172,7 +1172,7 @@ namespace gem5
 
             bool completed_inst = true;
             fault = NoFault;
-
+            DPRINTF(MinorExecute, "Committing inst: %s\n", *inst);
             /* Is the thread for this instruction suspended?  In that case, just
              *  stall as long as there are no pending interrupts */
             if (thread->status() == ThreadContext::Suspended &&
@@ -1201,10 +1201,22 @@ namespace gem5
             }
             else if (inst->staticInst->isMemRef())
             {
-                startMemRefExecution(inst, branch, fault, thread, false, completed_inst, issued_mem_ref);
-                DPRINTF(MinorExecute, "Sending mem inst to MEM: %s\n", *inst);
+                FUPipeline *fu = funcUnits[inst->fuIndex];
+                MinorFUTiming *timing = (!inst->isFault() ? fu->findTiming(inst->staticInst) : NULL);
+                const std::vector<Cycles> *src_latencies =
+                    (timing ? &(timing->srcRegsRelativeLats)
+                            : NULL);
+                const std::vector<bool> *cant_forward_from_fu_indices =
+                    &(fu->cantForwardFromFUIndices);
 
-                packIntoOutput(inst, insts_out, output_index);
+                completed_inst = false;
+                if (cpu.getScoreboard()[thread_id].canMemInstIssue(inst, NULL, NULL, cpu.curCycle() + Cycles(1), thread, false))
+                {
+                    startMemRefExecution(inst, branch, fault, thread, false, completed_inst, issued_mem_ref);
+                    DPRINTF(MinorExecute, "Sending mem inst to MEM: %s\n", *inst);
+
+                    packIntoOutput(inst, insts_out, output_index);
+                }
             }
             else if (inst->isInst() && inst->staticInst->isFullMemBarrier() &&
                      !cpu.getLSQ().canPushIntoStoreBuffer())
@@ -1216,9 +1228,11 @@ namespace gem5
             }
             else
             {
+                DPRINTF(MinorExecute, "Executing inst: %s\n", *inst);
                 ExecContext context(cpu, *cpu.threads[thread_id], inst);
                 if (!inst->staticInst->isMemRef())
                 {
+                    DPRINTF(MinorExecute, "Executing nomemref inst: %s\n", *inst);
                     fault = inst->staticInst->execute(&context, inst->traceData);
 
                     if (inst->traceData)
@@ -1379,14 +1393,16 @@ namespace gem5
         {
             /* Pop issued (to LSQ) and discarded mem refs from the inFUMemInsts
              *  as they've *definitely* exited the FUs */
+            auto inmemqueue = ex_info.inFUMemInsts->getQueue();
             if (inst->isMemRef())
             {
                 /* The MemRef could have been discarded from the FU or the memory
                  *  queue, so just check an FU instruction */
-                if (!ex_info.inFUMemInsts->empty() &&
-                    ex_info.inFUMemInsts->front().inst == inst)
+                auto el = std::find_if(inmemqueue.begin(), inmemqueue.end(), [inst](const QueuedInst &qi)
+                                       { return qi.inst == inst; });
+                if (!ex_info.inFUMemInsts->empty() && el != inmemqueue.end())
                 {
-                    ex_info.inFUMemInsts->pop();
+                    ex_info.inFUMemInsts->getQueue().erase(el);
                 }
             }
 
@@ -1405,7 +1421,11 @@ namespace gem5
 
                 /* Finished with the inst, remove it from the inst queue and
                  *  clear its dependencies */
-                ex_info.inFlightInsts->pop();
+                auto el = std::find_if(ex_info.inFlightInsts->getQueue().begin(),
+                                       ex_info.inFlightInsts->getQueue().end(),
+                                       [inst](const QueuedInst &qi)
+                                       { return qi.inst == inst; });
+                ex_info.inFlightInsts->getQueue().erase(el);
 
                 // MOVETO: Memory
                 /* Complete barriers in the LSQ/move to store buffer */
@@ -1551,7 +1571,9 @@ namespace gem5
                      *  the `if' tree a bit and allows other tests for inst
                      *  commit to be inserted here. */
                     bool try_to_commit = false;
-
+                    auto committable_fu = std::find_if(funcUnits.begin(), funcUnits.end(), [inst](FUPipeline *fu)
+                                                       { return !fu->front().isBubble(); });
+                    QueuedInst &committable_inst = (*committable_fu)->front();
                     /* Try and commit FU-less insts */
                     if (!completed_inst && inst->isNoCostInst())
                     {
@@ -1662,6 +1684,352 @@ namespace gem5
                                 DPRINTF(MinorExecute, "Unstalling %d for inst %s\n", inst->fuIndex, inst->id);
                                 funcUnits[inst->fuIndex]->stalled = false;
                             }
+                        }
+                    }
+                }
+                else
+                {
+                    DPRINTF(MinorExecute, "No instructions to commit\n");
+                    completed_inst = false;
+                }
+
+                /* All discardable instructions must also be 'completed' by now */
+                assert(!(discard_inst && !completed_inst));
+
+                /* Instruction committed but was discarded due to streamSeqNum
+                 *  mismatch */
+                if (discard_inst)
+                {
+                    DPRINTF(MinorExecute, "Discarding inst: %s as its stream"
+                                          " state was unexpected, expected: %d\n",
+                            *inst, ex_info.streamSeqNum);
+
+                    if (fault == NoFault)
+                        cpu.stats.numDiscardedOps++;
+                }
+
+                if (completed_inst && inst->isMemRef())
+                {
+                    /* The MemRef could have been discarded from the FU or the memory
+                     *  queue, so just check an FU instruction */
+                    if (!ex_info.inFUMemInsts->empty() &&
+                        ex_info.inFUMemInsts->front().inst == inst)
+                    {
+                        ex_info.inFUMemInsts->pop();
+                    }
+                }
+
+                /* Mark the mem inst as being in the LSQ */
+                if (issued_mem_ref)
+                {
+                    inst->fuIndex = 0;
+                    inst->inLSQ = true;
+                }
+                if (completed_inst /* && !(issued_mem_ref && fault == NoFault) */)
+                {
+                    finalizeCompletedInstruction(thread_id, inst, ex_info, fault, false, committed_inst);
+                }
+
+                /* Handle per-cycle instruction counting */
+                if (committed_inst)
+                {
+                    unsigned int aaa = 0;
+                    doCommitAccounting(inst, ex_info, num_insts_committed, aaa, false);
+                }
+            }
+        }
+
+        void
+        Execute::sendCommittableOutput(ThreadID thread_id, ForwardInstData &insts_out, unsigned int *output_index,
+                                       bool only_commit_microops, /* true if only microops should be committed,
+                                                                     e.g. when an interrupt has occurred. This
+                                                                     avoids having partially executed instructions */
+                                       bool discard,              // discard all instructions
+                                       BranchData &branch         // Eventual branches get written here
+        )
+        {
+            Fault fault = NoFault;
+            Cycles now = cpu.curCycle();
+            ExecuteThreadInfo &ex_info = executeInfo[thread_id];
+            // LSQ &lsq = cpu.getLSQ();
+            /**
+             * Try and execute as many instructions from the end of FU pipelines as
+             *  possible.  This *doesn't* include actually advancing the pipelines.
+             *
+             * We do this by looping on the front of the inFlightInsts queue for as
+             *  long as we can find the desired instruction at the end of the
+             *  functional unit it was issued to without seeing a branch or a fault.
+             *  In this function, these terms are used:
+             *      complete -- The instruction has finished its passage through
+             *          its functional unit and its fate has been decided
+             *          (committed, discarded, issued to the memory system)
+             *      commit -- The instruction is complete(d), not discarded and has
+             *          its effects applied to the CPU state
+             *      discard(ed) -- The instruction is complete but not committed
+             *          as its streamSeqNum disagrees with the current
+             *          Execute::streamSeqNum
+             *
+             *  Commits are also possible from two other places:
+             *
+             *  1) Responses returning from the LSQ
+             *  2) Mem ops issued to the LSQ ('committed' from the FUs) earlier
+             *      than their position in the inFlightInsts queue, but after all
+             *      their dependencies are resolved.
+             */
+
+            /* Has an instruction been completed?  Once this becomes false, we stop
+             *  trying to complete instructions. */
+            bool completed_inst = true;
+
+            /* Number of insts committed this cycle to check against commitLimit */
+            unsigned int num_insts_committed = 0;
+
+            /* Number of memory access instructions committed to check against
+             *  memCommitLimit */
+            // unsigned int num_mem_refs_committed = 0;
+
+            if (only_commit_microops && !ex_info.inFlightInsts->empty())
+            {
+                DPRINTF(MinorInterrupt, "Only commit microops %s %d\n",
+                        *(ex_info.inFlightInsts->front().inst),
+                        ex_info.lastCommitWasEndOfMacroop);
+            }
+
+            while (!ex_info.inFlightInsts->empty() && /* Some more instructions to process */
+                   !branch.isStreamChange() &&        /* No real branch */
+                   fault == NoFault &&                /* No faults */
+                   completed_inst &&                  /* Still finding instructions to execute */
+                   *output_index < outputWidth &&
+                   num_insts_committed != commitLimit /* Not reached commit limit */
+            )
+            {
+                if (only_commit_microops)
+                {
+                    DPRINTF(MinorInterrupt, "Committing tail of insts before"
+                                            " interrupt: %s\n",
+                            *(ex_info.inFlightInsts->front().inst));
+                }
+
+                QueuedInst *head_inflight_inst = &(ex_info.inFlightInsts->front());
+
+                InstSeqNum head_exec_seq_num =
+                    head_inflight_inst->inst->id.execSeqNum;
+
+                /* The instruction we actually process if completed_inst
+                 *  remains true to the end of the loop body.
+                 *  Start by considering the the head of the in flight insts queue */
+                MinorDynInstPtr inst = head_inflight_inst->inst;
+
+                bool committed_inst = false;
+                bool discard_inst = false;
+                // bool completed_mem_ref = false;
+                bool issued_mem_ref = false;
+                // bool early_memory_issue = false;
+
+                /* Must set this again to go around the loop */
+                completed_inst = false;
+
+                /* If we're just completing a macroop before an interrupt or drain,
+                 *  can we stil commit another microop (rather than a memory response)
+                 *  without crosing into the next full instruction? */
+                bool in_flight_insts = !ex_info.inFlightInsts->empty();
+                bool finished_macroop = only_commit_microops && ex_info.lastCommitWasEndOfMacroop;
+
+                bool can_commit_insts = (in_flight_insts || inst->isMemRef()) && !finished_macroop;
+
+                /* Can we find a mem response for this inst */
+                // LSQ::LSQRequestPtr mem_response =
+                // (inst->inLSQ ? lsq.findResponse(inst) : NULL);
+
+                DPRINTF(MinorExecute, "Trying to commit canCommitInsts: %d\n",
+                        can_commit_insts);
+
+                /* Test for PC events after every instruction */
+                if (isInbetweenInsts(thread_id) && tryPCEvents(thread_id))
+                {
+                    ThreadContext *thread = cpu.getContext(thread_id);
+
+                    /* Branch as there was a change in PC */
+                    updateBranchData(thread_id, BranchData::UnpredictedBranch,
+                                     MinorDynInst::bubble(), thread->pcState(), branch);
+                }
+                // else if (mem_response &&
+                //          num_mem_refs_committed < memoryCommitLimit)
+                // {
+                //     // MOVETO: MEMORY
+                //     discard_inst = inst->id.streamSeqNum !=
+                //                        ex_info.streamSeqNum ||
+                //                    discard;
+                //     tryToHandleMemResponses(ex_info, discard_inst, committed_inst, completed_mem_ref, completed_inst, inst, mem_response, branch, fault);
+                // }
+                else if (can_commit_insts)
+                {
+                    /* If true, this instruction will, subject to timing tweaks,
+                     *  be considered for completion.  try_to_commit flattens
+                     *  the `if' tree a bit and allows other tests for inst
+                     *  commit to be inserted here. */
+                    bool try_to_commit = false;
+                    QueuedInst *committable_inst = NULL;
+                    InstSeqNum committable_inst_seq_num = UINT64_MAX;
+                    auto inst_queue = ex_info.inFlightInsts->getQueue();
+                    for (auto it = inst_queue.begin(); it != inst_queue.end(); it++)
+                    {
+                        QueuedInst *fu_inst = &(*it);
+                        if (fu_inst->inst->isNoCostInst())
+                        {
+                            if (fu_inst->inst->id.execSeqNum < committable_inst_seq_num)
+                            {
+                                committable_inst = fu_inst;
+                                committable_inst_seq_num = fu_inst->inst->id.execSeqNum;
+                                try_to_commit = true;
+                            }
+                            else
+                            {
+                                DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
+                                        curTick(),
+                                        1, /* not stalling */
+                                        inst->pc->instAddr(),
+                                        inst->staticInst->disassemble(inst->pc->instAddr()),
+                                        -1);
+                            }
+                        }
+                        else
+                        {
+                            MinorDynInstPtr inst_ptr = funcUnits[fu_inst->inst->fuIndex]->front().inst;
+                            if (inst_ptr->isBubble() || inst_ptr != fu_inst->inst)
+                            {
+                                DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
+                                        curTick(),
+                                        0, /* not stalling */
+                                        inst->pc->instAddr(),
+                                        inst->staticInst->disassemble(inst->pc->instAddr()),
+                                        fu_inst->inst->fuIndex);
+                            }
+                        }
+                    }
+                    for (unsigned int fu_index = 0; fu_index < funcUnits.size(); fu_index++)
+                    {
+                        QueuedInst *fu_inst = &(funcUnits[fu_index]->front());
+                        if (!fu_inst->inst->isBubble() && fu_inst->inst->id.execSeqNum < committable_inst_seq_num)
+                        {
+                            committable_inst = fu_inst;
+                            committable_inst_seq_num = fu_inst->inst->id.execSeqNum;
+                            try_to_commit = true;
+                        }
+                    }
+                    if (committable_inst)
+                    {
+                        inst = committable_inst->inst;
+                    }
+                    /* Try and commit FU-less insts */
+                    if (!completed_inst && inst->isNoCostInst())
+                    {
+                        DPRINTF(MinorExecute, "Committing no cost inst: %s", *inst);
+
+                        completed_inst = true;
+                        try_to_commit = true;
+                    }
+
+                    if (try_to_commit)
+                    {
+                        discard_inst = inst->id.streamSeqNum !=
+                                           ex_info.streamSeqNum ||
+                                       discard;
+
+                        /* Is this instruction discardable as its streamSeqNum
+                         *  doesn't match? */
+                        if (!discard_inst)
+                        {
+                            /* Try to commit or discard a non-memory instruction.
+                             *  Memory ops are actually 'committed' from this FUs
+                             *  and 'issued' into the memory system so we need to
+                             *  account for them later (commit_was_mem_issue gets
+                             *  set) */
+                            if (inst->extraCommitDelayExpr)
+                            {
+                                DPRINTF(MinorExecute, "Evaluating expression for"
+                                                      " extra commit delay inst: %s\n",
+                                        *inst);
+
+                                ThreadContext *thread = cpu.getContext(thread_id);
+
+                                TimingExprEvalContext context(inst->staticInst,
+                                                              thread, NULL);
+
+                                uint64_t extra_delay = inst->extraCommitDelayExpr->evalFwd(context);
+
+                                DPRINTF(MinorExecute, "Extra commit delay expr"
+                                                      " result: %d\n",
+                                        extra_delay);
+
+                                if (extra_delay < 128)
+                                {
+                                    inst->extraCommitDelay += Cycles(extra_delay);
+                                }
+                                else
+                                {
+                                    DPRINTF(MinorExecute, "Extra commit delay was"
+                                                          " very long: %d\n",
+                                            extra_delay);
+                                }
+                                inst->extraCommitDelayExpr = NULL;
+                            }
+
+                            /* Move the extraCommitDelay from the instruction
+                             *  into the minimumCommitCycle */
+                            if (inst->extraCommitDelay != Cycles(0))
+                            {
+                                inst->minimumCommitCycle = cpu.curCycle() +
+                                                           inst->extraCommitDelay;
+                                inst->extraCommitDelay = Cycles(0);
+                            }
+
+                            else if (inst->minimumCommitCycle > now)
+                            {
+                                DPRINTF(MinorExecute, "Not committing inst: %s yet"
+                                                      " as it wants to be stalled for %d more cycles\n",
+                                        *inst, inst->minimumCommitCycle - now);
+                                completed_inst = false;
+                            }
+                            else
+                            {
+                                completed_inst = commitInst(inst, insts_out, output_index,
+                                                            false, branch, fault, issued_mem_ref);
+                            }
+                        }
+                        else
+                        {
+                            /* Discard instruction */
+                            completed_inst = true;
+                            inst->committed = true;
+                        }
+
+                        if (completed_inst)
+                        {
+                            /* Allow the pipeline to advance.  If the FU head
+                             *  instruction wasn't the inFlightInsts head
+                             *  but had already been committed, it would have
+                             *  unstalled the pipeline before here */
+                            DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
+                                    curTick(),
+                                    0, /* not stalling */
+                                    inst->pc->instAddr(),
+                                    inst->staticInst->disassemble(inst->pc->instAddr()),
+                                    inst->fuIndex);
+                            if (inst->fuIndex != noCostFUIndex)
+                            {
+                                DPRINTF(MinorExecute, "Unstalling %d for inst %s\n", inst->fuIndex, inst->id);
+                                funcUnits[inst->fuIndex]->stalled = false;
+                            }
+                        }
+                        else
+                        {
+                            DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
+                                    curTick(),
+                                    1, /* not stalling */
+                                    inst->pc->instAddr(),
+                                    inst->staticInst->disassemble(inst->pc->instAddr()),
+                                    inst->fuIndex);
                         }
                     }
                 }
@@ -1950,21 +2318,63 @@ namespace gem5
                 {
                     QueuedInst *head_inflight_inst = &(ex_info.inFlightInsts->front());
                     MinorDynInstPtr inst = head_inflight_inst->inst;
-
-                    bool can_transfer_mem_inst = false;
-                    // if (!ex_info.inFUMemInsts->empty() && lsq.canRequest())
+                    auto inst_queue = ex_info.inFlightInsts->getQueue();
+                    QueuedInst *committable_inst = NULL;
+                    InstSeqNum committable_inst_seq_num = UINT64_MAX;
+                    for (auto it = inst_queue.begin(); it != inst_queue.end(); it++)
                     {
-                        // const MinorDynInstPtr head_mem_ref_inst =
-                        // ex_info.inFUMemInsts->front().inst;
-                        // FUPipeline *fu = funcUnits[head_mem_ref_inst->fuIndex];
-                        // const MinorDynInstPtr &fu_inst = fu->front().inst;
-                        // can_transfer_mem_inst =
-                        // !fu_inst->isBubble() &&
-                        // fu_inst->id.threadId == tid &&
-                        // !fu_inst->inLSQ &&
-                        // fu_inst->canEarlyIssue &&
-                        // inst->id.execSeqNum > fu_inst->instToWaitFor;
+                        QueuedInst *fu_inst = &(*it);
+                        if (fu_inst->inst->isNoCostInst())
+                        {
+                            if (fu_inst->inst->id.execSeqNum < committable_inst_seq_num)
+                            {
+                                committable_inst = fu_inst;
+                                committable_inst_seq_num = fu_inst->inst->id.execSeqNum;
+                                DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
+                                        curTick(),
+                                        0, /* not stalling */
+                                        fu_inst->inst->pc->instAddr(),
+                                        fu_inst->inst->staticInst->disassemble(fu_inst->inst->pc->instAddr()),
+                                        -1);
+                            }
+                            else
+                            {
+                                DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
+                                        curTick(),
+                                        1, /* not stalling */
+                                        fu_inst->inst->pc->instAddr(),
+                                        fu_inst->inst->staticInst->disassemble(fu_inst->inst->pc->instAddr()),
+                                        -1);
+                            }
+                        }
+                        else
+                        {
+                            MinorDynInstPtr inst_ptr = funcUnits[fu_inst->inst->fuIndex]->front().inst;
+                            if (inst_ptr->isBubble() || inst_ptr != fu_inst->inst)
+                            {
+                                DPRINTF(MinorGUI, "Log4GUI: execute: %d: %d: %x: %s: %d\n",
+                                        curTick(),
+                                        0, /* not stalling */
+                                        fu_inst->inst->pc->instAddr(),
+                                        fu_inst->inst->staticInst->disassemble(fu_inst->inst->pc->instAddr()),
+                                        fu_inst->inst->fuIndex);
+                            }
+                        }
                     }
+                    for (unsigned int fu_index = 0; fu_index < funcUnits.size(); fu_index++)
+                    {
+                        QueuedInst *fu_inst = &(funcUnits[fu_index]->front());
+                        if (!fu_inst->inst->isBubble())
+                        {
+                            committable_inst = fu_inst;
+                            committable_inst_seq_num = fu_inst->inst->id.execSeqNum;
+                        }
+                    }
+                    if (committable_inst)
+                    {
+                        inst = committable_inst->inst;
+                    }
+                    bool can_transfer_mem_inst = false;
 
                     bool can_execute_fu_inst = inst->fuIndex == noCostFUIndex;
                     if (can_commit_insts && !can_transfer_mem_inst &&
@@ -2250,7 +2660,7 @@ namespace gem5
                     if (commit_info.drainState == DrainCurrentInst)
                     {
                         /* Commit only micro-ops, don't kill anything else */
-                        sendOutput(commit_tid, insts_out, output_index, true, false, branch);
+                        sendCommittableOutput(commit_tid, insts_out, output_index, true, false, branch);
 
                         if (isInbetweenInsts(commit_tid))
                             setDrainState(commit_tid, DrainHaltFetch);
@@ -2263,7 +2673,7 @@ namespace gem5
                         /* Kill all instructions */
                         while (getInput(commit_tid))
                             popInput(commit_tid);
-                        sendOutput(commit_tid, insts_out, output_index, false, true, branch);
+                        sendCommittableOutput(commit_tid, insts_out, output_index, false, true, branch);
                     }
                 }
                 else
@@ -2274,7 +2684,7 @@ namespace gem5
                             commit_tid);
                     bool only_commit_microops = interrupted &&
                                                 hasInterrupt(commit_tid);
-                    sendOutput(commit_tid, insts_out, output_index, only_commit_microops, false, branch);
+                    sendCommittableOutput(commit_tid, insts_out, output_index, only_commit_microops, false, branch);
                 }
 
                 /* Halt fetch, but don't do it until we have the current instruction in

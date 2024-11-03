@@ -56,12 +56,14 @@ class L1Cache(Cache):
     response_latency = 2
     mshrs = 4
     tgts_per_mshr = 20
+    size = "8388608"
 
 
 class L1_ICache(L1Cache):
     is_read_only = True
     # Writeback clean lines as well
     writeback_clean = True
+    size = "8388608"
 
 
 class L1_DCache(L1Cache):

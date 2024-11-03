@@ -676,17 +676,26 @@ namespace gem5
             {
                 /* If it's a memory instruction, we need to check the
                  *  memory ordering model */
-                if (!cpu.getScoreboard()[tid].canInstIssue(output_inst,
-                                                           NULL, NULL,
-                                                           cpu.curCycle() + Cycles(1), cpu.getContext(tid)))
+                if (!cpu.getScoreboard()[tid].canMemInstIssue(output_inst,
+                                                              src_latencies, cant_forward_from_fu_indices,
+                                                              cpu.curCycle() + Cycles(1), cpu.getContext(tid), true))
                 {
                     return false;
                 }
             }
+            Cycles delay = Cycles(1);
+            if (output_inst->isInst() && output_inst->staticInst->isControl())
+            {
+                delay = Cycles(0);
+            }
 
-            if (!cpu.getScoreboard()[tid].canInstIssue(output_inst,
-                                                       src_latencies, cant_forward_from_fu_indices,
-                                                       cpu.curCycle() + Cycles(1), cpu.getContext(tid)))
+            bool can_issue = output_inst->isMemRef() ? cpu.getScoreboard()[tid].canMemInstIssue(output_inst,
+                                                                                                src_latencies, cant_forward_from_fu_indices,
+                                                                                                cpu.curCycle() + delay, cpu.getContext(tid), true)
+                                                     : cpu.getScoreboard()[tid].canInstIssue(output_inst,
+                                                                                             src_latencies, cant_forward_from_fu_indices,
+                                                                                             cpu.curCycle() + delay, cpu.getContext(tid));
+            if (!can_issue)
             {
                 return false;
             }
@@ -703,7 +712,7 @@ namespace gem5
                     timing->extraAssumedLat;
             }
 
-            cpu.getScoreboard()[tid].markupInstDests(output_inst, (issued_mem_ref && output_inst->staticInst->isLoad() ? Cycles(1) : Cycles(0)) + cpu.curCycle() + Cycles(1) + fu->description.opLat + extra_dest_retire_lat + extra_assumed_lat,
+            cpu.getScoreboard()[tid].markupInstDests(output_inst, cpu.curCycle() + Cycles(1) + fu->description.opLat + extra_dest_retire_lat + extra_assumed_lat,
                                                      cpu.getContext(tid),
                                                      issued_mem_ref && extra_assumed_lat == Cycles(0));
             return true;
@@ -937,9 +946,10 @@ namespace gem5
                             DPRINTF(Decode, "Can pass to Execute: %s\n",
                                     *instWaitingDependenciesPtr[tid]);
                             inst_ptr_4_GUI = instWaitingDependenciesPtr[tid];
+
                             DPRINTF(MinorGUI, "Log4GUI: decode: %d: %d: %x: %s\n",
                                     curTick(),
-                                    false,
+                                    was_stalling,
                                     inst_ptr_4_GUI->pc->instAddr(),
                                     inst_ptr_4_GUI->staticInst->disassemble(inst_ptr_4_GUI->pc->instAddr()));
                             packIntoOutput(instWaitingDependenciesPtr[tid],
@@ -947,20 +957,20 @@ namespace gem5
                             instWaitingDependencies[tid] = false;
                             instWaitingDependenciesPtr[tid] = nullptr;
                             /* Continue the execution */
-                            is_stalling = false;
+                            was_stalling = false;
                         }
                         else
                         {
-                            DPRINTF(Decode, "Cannot pass to Execute cristodio: %s\n",
+                            DPRINTF(Decode, "Cannot pass to Execute: %s\n",
                                     *instWaitingDependenciesPtr[tid]);
                             /* Stall here */
-                            is_stalling = true;
                             inst_ptr_4_GUI = instWaitingDependenciesPtr[tid];
                             DPRINTF(MinorGUI, "Log4GUI: decode: %d: %d: %x: %s\n",
                                     curTick(),
-                                    is_stalling,
+                                    was_stalling,
                                     inst_ptr_4_GUI->pc->instAddr(),
                                     inst_ptr_4_GUI->staticInst->disassemble(inst_ptr_4_GUI->pc->instAddr()));
+                            was_stalling = true;
                         }
                         break;
                     }
@@ -1012,15 +1022,15 @@ namespace gem5
 
                         if (checkScoreboardAndUpdate(output_inst, tid))
                         {
-                            DPRINTF(Decode, "Can pass to Execute  aaa: %s\n", *output_inst);
+                            DPRINTF(Decode, "Can pass to Execute: %s\n", *output_inst);
                             packIntoOutput(output_inst, insts_out, &output_index);
                             /* Continue the execution normally */
-                            is_stalling = false;
                             DPRINTF(MinorGUI, "Log4GUI: decode: %d: %d: %x: %s\n",
                                     curTick(),
-                                    is_stalling,
+                                    was_stalling,
                                     output_inst->pc->instAddr(),
                                     output_inst->staticInst->disassemble(output_inst->pc->instAddr()));
+                            was_stalling = false;
                         }
                         else
                         {
@@ -1028,12 +1038,12 @@ namespace gem5
                             instWaitingDependencies[tid] = true;
                             instWaitingDependenciesPtr[tid] = output_inst;
                             /* Stall here */
-                            is_stalling = true;
                             DPRINTF(MinorGUI, "Log4GUI: decode: %d: %d: %x: %s\n",
                                     curTick(),
-                                    is_stalling,
+                                    was_stalling,
                                     output_inst->pc->instAddr(),
                                     output_inst->staticInst->disassemble(output_inst->pc->instAddr()));
+                            was_stalling = true;
                             break;
                         }
                     }

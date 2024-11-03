@@ -205,6 +205,7 @@ namespace gem5
 
                     if (numResults[index] == 0)
                     {
+                        oldReturnCycles[index] = returnCycle[index];
                         returnCycle[index] = Cycles(0);
                         writingInst[index] = 0;
                         fuIndices[index] = invalidFUIndex;
@@ -266,14 +267,37 @@ namespace gem5
                                         (*cant_forward_from_fu_indices)[src_reg_fu];
 
                     Cycles relative_latency = (cant_forward ? Cycles(0) : (src_index >= num_relative_latencies ? default_relative_latency : (*src_reg_relative_latencies)[src_index]));
-
-                    if (returnCycle[index] > (now + relative_latency) ||
+                    Cycles retCycle = inst->isInst() && inst->staticInst->isControl() ? oldReturnCycles[index] : returnCycle[index];
+                    if (retCycle > (now + relative_latency) ||
                         numUnpredictableResults[index] != 0)
                     {
                         ret = false;
                     }
                 }
                 src_index++;
+            }
+
+            unsigned int num_dests = staticInst->numDestRegs();
+            for (unsigned int dest_index = 0; dest_index < num_dests; dest_index++)
+            {
+                RegId reg = staticInst->destRegIdx(dest_index).flatten(*isa);
+                unsigned short int index;
+
+                if (findIndex(reg, index))
+                {
+                    if (numResults[index] != 0)
+                    {
+                        int dest_reg_fu = fuIndices[index];
+                        if ((returnCycle[index] - 1) > now ||
+                            numUnpredictableResults[index] != 0)
+                        {
+                            DPRINTF(MinorTiming, "Inst: %s timing extra decode has"
+                                                 " dest. reg. %d busy\n",
+                                    staticInst->disassemble(0), index);
+                            ret = false;
+                        }
+                    }
+                }
             }
 
             if (debug::MinorTiming)
@@ -294,7 +318,7 @@ namespace gem5
         Scoreboard::canMemInstIssue(MinorDynInstPtr inst,
                                     const std::vector<Cycles> *src_reg_relative_latencies,
                                     const std::vector<bool> *cant_forward_from_fu_indices,
-                                    Cycles now, ThreadContext *thread_context)
+                                    Cycles now, ThreadContext *thread_context, bool for_effective_address)
         {
             /* Always allow fault to be issued */
             if (inst->isFault())
@@ -323,25 +347,75 @@ namespace gem5
             auto *isa = thread_context->getIsaPtr();
 
             /* For each source register, find the latest result */
-            RegId reg = staticInst->srcRegIdx(0).flatten(*isa);
-            unsigned short int index;
-
-            if (findIndex(reg, index))
+            if (for_effective_address)
             {
-                int src_reg_fu = fuIndices[index];
-                bool cant_forward = src_reg_fu != invalidFUIndex &&
-                                    cant_forward_from_fu_indices &&
-                                    src_reg_fu < cant_forward_from_fu_indices->size() &&
-                                    (*cant_forward_from_fu_indices)[src_reg_fu];
-                Cycles relative_latency = (cant_forward ? Cycles(0) : (0 >= num_relative_latencies ? default_relative_latency : (*src_reg_relative_latencies)[0]));
-                if (returnCycle[index] > (now + relative_latency) ||
-                    numUnpredictableResults[index] != 0)
+                RegId reg = staticInst->srcRegIdx(0).flatten(*isa);
+                unsigned short int index;
+
+                if (findIndex(reg, index))
                 {
-                    ret = false;
+                    int src_reg_fu = fuIndices[index];
+                    bool cant_forward = src_reg_fu != invalidFUIndex &&
+                                        cant_forward_from_fu_indices &&
+                                        src_reg_fu < cant_forward_from_fu_indices->size() &&
+                                        (*cant_forward_from_fu_indices)[src_reg_fu];
+
+                    Cycles relative_latency = (cant_forward ? Cycles(0) : (0 >= num_relative_latencies ? default_relative_latency : (*src_reg_relative_latencies)[0]));
+                    Cycles retCycle = returnCycle[index];
+                    if (retCycle > (now + relative_latency) ||
+                        numUnpredictableResults[index] != 0)
+                    {
+                        return false;
+                    }
+                }
+            }
+            else if (!for_effective_address && inst->staticInst->isStore())
+            {
+                RegId reg = staticInst->srcRegIdx(1).flatten(*isa);
+                unsigned short int index;
+
+                if (findIndex(reg, index))
+                {
+                    int src_reg_fu = fuIndices[index];
+                    bool cant_forward = src_reg_fu != invalidFUIndex &&
+                                        cant_forward_from_fu_indices &&
+                                        src_reg_fu < cant_forward_from_fu_indices->size() &&
+                                        (*cant_forward_from_fu_indices)[src_reg_fu];
+
+                    Cycles relative_latency = (cant_forward ? Cycles(0) : (1 >= num_relative_latencies ? default_relative_latency : (*src_reg_relative_latencies)[1]));
+                    Cycles retCycle = inst->isInst() && inst->staticInst->isControl() ? oldReturnCycles[index] : returnCycle[index];
+                    if (retCycle > (now + relative_latency) ||
+                        numUnpredictableResults[index] != 0)
+                    {
+                        return false;
+                    }
                 }
             }
 
-            return ret;
+            /* unsigned int num_dests = staticInst->numDestRegs();
+            for (unsigned int dest_index = 0; dest_index < num_dests; dest_index++)
+            {
+                RegId reg = staticInst->destRegIdx(dest_index).flatten(*isa);
+                unsigned short int index;
+
+                if (findIndex(reg, index))
+                {
+                    if (numResults[index] != 0)
+                    {
+                        int dest_reg_fu = fuIndices[index];
+                        if (returnCycle[index] > now ||
+                            numUnpredictableResults[index] != 0)
+                        {
+                            DPRINTF(MinorTiming, "Inst: %s timing extra decode has"
+                                                 " dest. reg. %d busy\n",
+                                    staticInst->disassemble(0), index);
+                            return false;
+                        }
+                    }
+                }
+            } */
+
+            return true;
         }
 
         void

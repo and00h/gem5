@@ -101,6 +101,7 @@ namespace gem5
        *  long as instruction completion is *strictly* in order with
        *  respect to instructions with unpredictable result timing */
       std::vector<Cycles> returnCycle;
+      std::vector<Cycles> oldReturnCycles;
 
       /** The execute sequence number of the most recent inst to generate this
        *  register value */
@@ -121,6 +122,7 @@ namespace gem5
                                                            numUnpredictableResults(numRegs, 0),
                                                            fuIndices(numRegs, invalidFUIndex),
                                                            returnCycle(numRegs, Cycles(0)),
+                                                           oldReturnCycles(numRegs, Cycles(0)),
                                                            writingInst(numRegs, 0)
       {
       }
@@ -157,7 +159,7 @@ namespace gem5
                         Cycles now, ThreadContext *thread_context);
       bool canMemInstIssue(MinorDynInstPtr, const std::vector<Cycles> *src_reg_relative_latencies,
                            const std::vector<bool> *cant_forward_from_fu_indices,
-                           Cycles now, ThreadContext *thread_context);
+                           Cycles now, ThreadContext *thread_context, bool for_effective_address);
 
       /** MinorTraceIF interface */
       void minorTrace() const;

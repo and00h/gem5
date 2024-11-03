@@ -153,10 +153,11 @@ class MinorFUPool(SimObject):
 
 
 class MinorDefaultIntFU(MinorFU):
-    opClasses = minorMakeOpClassSet(["IntAlu"])
-    timings = [MinorFUTiming(description="Int", srcRegsRelativeLats=[2])]
+    opClasses = minorMakeOpClassSet(
+        ["IntAlu", "MemRead", "MemWrite", "FloatMemRead", "FloatMemWrite"]
+    )
+    timings = [MinorFUTiming(description="Int", srcRegsRelativeLats=[0])]
     opLat = 1
-    issueLat = 0
 
 
 class MinorDefaultIntMulFU(MinorFU):
@@ -253,16 +254,16 @@ class MinorDefaultPredFU(MinorFU):
     opLat = 1
 
 
-class MinorDefaultMemFU(MinorFU):
-    opClasses = minorMakeOpClassSet(
-        ["MemRead", "MemWrite", "FloatMemRead", "FloatMemWrite"]
-    )
-    timings = [
-        MinorFUTiming(
-            description="Mem", srcRegsRelativeLats=[1], extraAssumedLat=0
-        )
-    ]
-    opLat = 1
+# class MinorDefaultMemFU(MinorFU):
+#     opClasses = minorMakeOpClassSet(
+#         ["MemRead", "MemWrite", "FloatMemRead", "FloatMemWrite"]
+#     )
+#     timings = [
+#         MinorFUTiming(
+#             description="Mem", srcRegsRelativeLats=[1], extraAssumedLat=0
+#         )
+#     ]
+#     opLat = 1
 
 
 class MinorDefaultMiscFU(MinorFU):
@@ -279,7 +280,7 @@ class MinorDefaultFUPool(MinorFUPool):
         MinorDefaultFloatMulFU(),
         MinorDefaultFloatDivFU(),
         MinorDefaultPredFU(),
-        MinorDefaultMemFU(),
+        # MinorDefaultMemFU(),
         MinorDefaultMiscFU(),
     ]
 

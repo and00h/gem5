@@ -334,6 +334,9 @@ namespace gem5
       void sendOutput(ThreadID thread_id, ForwardInstData &insts_out, unsigned int *output_index,
                       bool only_commit_microops, bool discard,
                       BranchData &branch);
+      void sendCommittableOutput(ThreadID thread_id, ForwardInstData &insts_out, unsigned int *output_index,
+                                 bool only_commit_microops, bool discard,
+                                 BranchData &branch);
 
       void packIntoOutput(
           MinorDynInstPtr output_inst,

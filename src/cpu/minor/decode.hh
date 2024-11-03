@@ -60,93 +60,91 @@
 namespace gem5
 {
 
-GEM5_DEPRECATED_NAMESPACE(Minor, minor);
-namespace minor
-{
+  GEM5_DEPRECATED_NAMESPACE(Minor, minor);
+  namespace minor
+  {
 
-/* Decode takes instructions from Fetch2 and decomposes them into micro-ops
- * to feed to Execute.  It generates a new sequence number for each
- * instruction: execSeqNum.
- */
-class Decode : public Named
-{
-  protected:
-    /** Pointer back to the containing CPU */
-    MinorCPU &cpu;
-
-    /** Input port carrying macro instructions from Fetch1 */
-    Latch<ForwardLineData>::Output inp;
-
-    /** Input port carrying branches from Execute.  This is a snoop of the
-     *  data provided to F1. */
-    Latch<BranchData>::Output branchInp;
-
-    /** Output port carrying predictions back to Fetch1 */
-    Latch<BranchData>::Input predictionOut;
-
-    /** Output port carrying micro-op decomposed instructions to Execute */
-    Latch<ForwardInstData>::Input out;
-
-    /** Interface to reserve space in the next stage */
-    std::vector<InputBuffer<ForwardInstData>> &nextStageReserve;
-
-    /** Width of output of this stage/input of next in instructions */
-    unsigned int outputWidth;
-
-    /** If true, more than one input word can be processed each cycle if
-     *  there is room in the output to contain its processed data */
-    bool processMoreThanOneInput;
-
-    /** Branch predictor passed from Python configuration */
-    branch_prediction::BPredUnit &branchPredictor;
-
-    /** True when there are still microinstructions to extract from a
-     *  macroinstruction and to be packed into output */
-    bool macroInstPending = false;
-
-    /** Pointer to the macroinstruction that needs further 
-     * decomposition */
-    MinorDynInstPtr macroInstPendingPtr = NULL;
-
-    /** True when there is a microinstruction waiting for a scoreboard
-     *  entry to become available */
-    std::vector<bool> instWaitingDependencies;
-
-    /** Pointer to the inst that is waiting for a scoreboard
-     *  entry to become available */
-    std::vector<MinorDynInstPtr> instWaitingDependenciesPtr;
-
-    /** Scoreboard reference from execute stage */
-    std::vector<Scoreboard>& scoreboard;
-
-    /** Functional units reference from execute stage */
-    std::vector<FUPipeline *>& funcUnits;
-
-  public:
-    /* Public for Pipeline to be able to pass it to Fetch1 */
-    std::vector<InputBuffer<ForwardLineData>> inputBuffer;
-
-  protected:
-    /** Data members after this line are cycle-to-cycle state */
-
-    struct DecodeThreadInfo
+    /* Decode takes instructions from Fetch2 and decomposes them into micro-ops
+     * to feed to Execute.  It generates a new sequence number for each
+     * instruction: execSeqNum.
+     */
+    class Decode : public Named
     {
+    protected:
+      /** Pointer back to the containing CPU */
+      MinorCPU &cpu;
+
+      /** Input port carrying macro instructions from Fetch1 */
+      Latch<ForwardLineData>::Output inp;
+
+      /** Input port carrying branches from Execute.  This is a snoop of the
+       *  data provided to F1. */
+      Latch<BranchData>::Output branchInp;
+
+      /** Output port carrying predictions back to Fetch1 */
+      Latch<BranchData>::Input predictionOut;
+
+      /** Output port carrying micro-op decomposed instructions to Execute */
+      Latch<ForwardInstData>::Input out;
+
+      /** Interface to reserve space in the next stage */
+      std::vector<InputBuffer<ForwardInstData>> &nextStageReserve;
+
+      /** Width of output of this stage/input of next in instructions */
+      unsigned int outputWidth;
+
+      /** If true, more than one input word can be processed each cycle if
+       *  there is room in the output to contain its processed data */
+      bool processMoreThanOneInput;
+
+      /** Branch predictor passed from Python configuration */
+      branch_prediction::BPredUnit &branchPredictor;
+
+      /** True when there are still microinstructions to extract from a
+       *  macroinstruction and to be packed into output */
+      bool macroInstPending = false;
+
+      /** Pointer to the macroinstruction that needs further
+       * decomposition */
+      MinorDynInstPtr macroInstPendingPtr = NULL;
+
+      /** True when there is a microinstruction waiting for a scoreboard
+       *  entry to become available */
+      std::vector<bool> instWaitingDependencies;
+
+      /** Pointer to the inst that is waiting for a scoreboard
+       *  entry to become available */
+      std::vector<MinorDynInstPtr> instWaitingDependenciesPtr;
+
+      /** Scoreboard reference from execute stage */
+      std::vector<Scoreboard> &scoreboard;
+
+      /** Functional units reference from execute stage */
+      std::vector<FUPipeline *> &funcUnits;
+
+    public:
+      /* Public for Pipeline to be able to pass it to Fetch1 */
+      std::vector<InputBuffer<ForwardLineData>> inputBuffer;
+
+    protected:
+      /** Data members after this line are cycle-to-cycle state */
+
+      struct DecodeThreadInfo
+      {
         DecodeThreadInfo() {}
 
-        DecodeThreadInfo(const DecodeThreadInfo& other) :
-            inputIndex(other.inputIndex),
-            havePC(other.havePC),
-            lastStreamSeqNum(other.lastStreamSeqNum),
-            expectedStreamSeqNum(other.expectedStreamSeqNum),
-            predictionSeqNum(other.predictionSeqNum),
-            inMacroop(other.inMacroop),
-            execSeqNum(other.execSeqNum),
-            blocked(other.blocked)
+        DecodeThreadInfo(const DecodeThreadInfo &other) : inputIndex(other.inputIndex),
+                                                          havePC(other.havePC),
+                                                          lastStreamSeqNum(other.lastStreamSeqNum),
+                                                          expectedStreamSeqNum(other.expectedStreamSeqNum),
+                                                          predictionSeqNum(other.predictionSeqNum),
+                                                          inMacroop(other.inMacroop),
+                                                          execSeqNum(other.execSeqNum),
+                                                          blocked(other.blocked)
         {
-            set(pc, other.pc);
-            set(microopPC, other.microopPC);
+          set(pc, other.pc);
+          set(microopPC, other.microopPC);
         }
-
 
         /** Index into the inputBuffer's head marking the start of unhandled
          *  instructions */
@@ -197,14 +195,13 @@ class Decode : public Named
 
         /** Blocked indication for report */
         bool blocked = false;
+      };
 
-    };
+      std::vector<DecodeThreadInfo> decodeInfo;
+      ThreadID threadPriority;
 
-    std::vector<DecodeThreadInfo> decodeInfo;
-    ThreadID threadPriority;
-
-    struct DecodeStats : public statistics::Group
-    {
+      struct DecodeStats : public statistics::Group
+      {
         DecodeStats(MinorCPU *cpu);
         /** Stats */
         statistics::Scalar intInstructions;
@@ -213,149 +210,149 @@ class Decode : public Named
         statistics::Scalar loadInstructions;
         statistics::Scalar storeInstructions;
         statistics::Scalar amoInstructions;
-    } stats;
+      } stats;
 
-  protected:
-    /** Get a piece of data to work on, or 0 if there is no data. */
-    const ForwardLineData *getInput(ThreadID tid);
+    protected:
+      /** Get a piece of data to work on, or 0 if there is no data. */
+      const ForwardLineData *getInput(ThreadID tid);
 
-    /** Pop an element off the input buffer, if there are any */
-    void popInput(ThreadID tid);
+      /** Pop an element off the input buffer, if there are any */
+      void popInput(ThreadID tid);
 
-    /** Dump the whole contents of the input buffer.  Useful after a
-     *  prediction changes control flow */
-    void dumpAllInput(ThreadID tid);
+      /** Dump the whole contents of the input buffer.  Useful after a
+       *  prediction changes control flow */
+      void dumpAllInput(ThreadID tid);
 
-    /** Update local branch prediction structures from feedback from
-     *  Execute. */
-    void updateBranchPrediction(const BranchData &branch);
+      /** Update local branch prediction structures from feedback from
+       *  Execute. */
+      void updateBranchPrediction(const BranchData &branch);
 
-    /** Predicts branches for the given instruction.  Updates the
-     *  instruction's predicted... fields and also the branch which
-     *  carries the prediction to Fetch1 */
-    void predictBranch(MinorDynInstPtr inst, BranchData &branch);
+      /** Predicts branches for the given instruction.  Updates the
+       *  instruction's predicted... fields and also the branch which
+       *  carries the prediction to Fetch1 */
+      void predictBranch(MinorDynInstPtr inst, BranchData &branch);
 
-    /** Use the current threading policy to determine the next thread to
-     *  decode from. */
-    ThreadID getScheduledThread();
+      /** Use the current threading policy to determine the next thread to
+       *  decode from. */
+      ThreadID getScheduledThread();
 
-    /** Check if a specific instruction can be ran from the
-     * next clock cycle. If so, update the scoreboard and return true */
-    bool checkScoreboardAndUpdate(MinorDynInstPtr output_inst, ThreadID tid);
-    
-    /** Find the functional unit that can execute the given instruction.
-     * Returns -1 if no functional unit can execute the instruction. */
-    int findFunctionUnit(MinorDynInstPtr output_inst, 
-      std::vector<FUPipeline *>& funcUnits );
+      /** Check if a specific instruction can be ran from the
+       * next clock cycle. If so, update the scoreboard and return true */
+      bool checkScoreboardAndUpdate(MinorDynInstPtr output_inst, ThreadID tid);
 
-  public:
-    Decode(const std::string &name,
-        MinorCPU &cpu_,
-        const BaseMinorCPUParams &params,
-        Latch<ForwardLineData>::Output inp_,
-        Latch<BranchData>::Output branchInp_,
-        Latch<BranchData>::Input predictionOut_,
-        Latch<ForwardInstData>::Input out_,
-        std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer,
-        std::vector<Scoreboard> &scoreboard_,
-        std::vector<FUPipeline *> &funcUnits_);
+      /** Find the functional unit that can execute the given instruction.
+       * Returns -1 if no functional unit can execute the instruction. */
+      int findFunctionUnit(MinorDynInstPtr output_inst,
+                           std::vector<FUPipeline *> &funcUnits);
 
-  protected:
-    /** Push input coming from input wire into input buffer */
-    void pushIntoInpBuffer();
+    public:
+      Decode(const std::string &name,
+             MinorCPU &cpu_,
+             const BaseMinorCPUParams &params,
+             Latch<ForwardLineData>::Output inp_,
+             Latch<BranchData>::Output branchInp_,
+             Latch<BranchData>::Input predictionOut_,
+             Latch<ForwardInstData>::Input out_,
+             std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer,
+             std::vector<Scoreboard> &scoreboard_,
+             std::vector<FUPipeline *> &funcUnits_);
 
-    /** Check what branches were taken by execute and dumps all
-    * lines that are now old */
-    void dumpIfBranchesExecuted(const BranchData &branch);
+    protected:
+      /** Push input coming from input wire into input buffer */
+      void pushIntoInpBuffer();
 
-    /** Pops all lines that have a Prediction Sequence Number mismatch */
-    void popLinesIfPredictionMismatch(ThreadID tid);
+      /** Check what branches were taken by execute and dumps all
+       * lines that are now old */
+      void dumpIfBranchesExecuted(const BranchData &branch);
 
-    /** Mark each thread as blocked if it cannot reserve any space in
-    * next stage, then calls popLinesIfPredictionMismatch(tid)  */
-    void updateAllThreadsStatus();
+      /** Pops all lines that have a Prediction Sequence Number mismatch */
+      void popLinesIfPredictionMismatch(ThreadID tid);
 
-    /** Assign a PC to the line if it's not to discard */
-    void givePcIfValidInstruction(ThreadID tid, bool discard_line,
-                                const ForwardLineData *line_in,
-                                InstDecoder *decoder);
+      /** Mark each thread as blocked if it cannot reserve any space in
+       * next stage, then calls popLinesIfPredictionMismatch(tid)  */
+      void updateAllThreadsStatus();
 
-    /** Creates a dynamic instruction that is a fault */
-    MinorDynInstPtr packFault(const ForwardLineData *line_in, ThreadID tid);
+      /** Assign a PC to the line if it's not to discard */
+      void givePcIfValidInstruction(ThreadID tid, bool discard_line,
+                                    const ForwardLineData *line_in,
+                                    InstDecoder *decoder);
 
-    /** Creates a dynamic instruction from static decoded instruction */
-    MinorDynInstPtr packInst(StaticInstPtr decoded_inst, InstId id,
-                                ThreadID tid);
+      /** Creates a dynamic instruction that is a fault */
+      MinorDynInstPtr packFault(const ForwardLineData *line_in, ThreadID tid);
 
-    /** Collect some statistics about the decoded static instruction */
-    void collectStats(StaticInstPtr decoded_inst);                 
+      /** Creates a dynamic instruction from static decoded instruction */
+      MinorDynInstPtr packInst(StaticInstPtr decoded_inst, InstId id,
+                               ThreadID tid);
 
-    /** Set inputindex to the next in order to process next input */
-    void advanceInput(ThreadID tid);
+      /** Collect some statistics about the decoded static instruction */
+      void collectStats(StaticInstPtr decoded_inst);
 
-    /** Set the pc to fetch the next micro instruction */
-    void setUpPcForMicroop(ThreadID tid, MinorDynInstPtr inst);
+      /** Set inputindex to the next in order to process next input */
+      void advanceInput(ThreadID tid);
 
-    /** Extract a micro instruction from a macroop */
-    StaticInstPtr extractMicroInst(ThreadID tid, StaticInstPtr static_inst);
+      /** Set the pc to fetch the next micro instruction */
+      void setUpPcForMicroop(ThreadID tid, MinorDynInstPtr inst);
 
-    /** Create dynamic instruction from static decoded  micro instruction */
-    /*MinorDynInstPtr packInst(StaticInstPtr static_micro_inst,
-                InstId id, ThreadID tid);*/
+      /** Extract a micro instruction from a macroop */
+      StaticInstPtr extractMicroInst(ThreadID tid, StaticInstPtr static_inst);
 
-    /** Only allows last microop to contain a predicted next address */
-    void allowPredictionOnLastMicroop(StaticInstPtr static_micro_inst,
-                MinorDynInstPtr output_inst, MinorDynInstPtr macro_inst);
+      /** Create dynamic instruction from static decoded  micro instruction */
+      /*MinorDynInstPtr packInst(StaticInstPtr static_micro_inst,
+                  InstId id, ThreadID tid);*/
 
-    /** Perform a macroop decomposition into microop isntructions */
-    MinorDynInstPtr decomposition(ThreadID tid, MinorDynInstPtr inst,
-                unsigned int output_index);
+      /** Only allows last microop to contain a predicted next address */
+      void allowPredictionOnLastMicroop(StaticInstPtr static_micro_inst,
+                                        MinorDynInstPtr output_inst, MinorDynInstPtr macro_inst);
 
-    /** Assign the ExecSeqNum to the instruction */
-    void assignExecSeqNum(ThreadID tid, MinorDynInstPtr output_inst);
+      /** Perform a macroop decomposition into microop isntructions */
+      MinorDynInstPtr decomposition(ThreadID tid, MinorDynInstPtr inst,
+                                    unsigned int output_index);
 
-    /** Pack instruction into output wire */
-    void packIntoOutput(MinorDynInstPtr output_inst,
-                ForwardInstData &insts_out, unsigned int *output_index);
+      /** Assign the ExecSeqNum to the instruction */
+      void assignExecSeqNum(ThreadID tid, MinorDynInstPtr output_inst);
 
-    /** Macroop tracing */
-    void macroopTraceInst(MinorDynInstPtr dyn_inst);
+      /** Pack instruction into output wire */
+      void packIntoOutput(MinorDynInstPtr output_inst,
+                          ForwardInstData &insts_out, unsigned int *output_index);
 
-    /** Sets line_in and PC and handles input buffer depending on what
-    * type of instruction it's being processed */
-    void finishLineProcessing(ThreadID tid, const ForwardLineData **line_in,
-                            bool prediction, bool discard_line);
+      /** Macroop tracing */
+      void macroopTraceInst(MinorDynInstPtr dyn_inst);
 
-    /** If the stage can process more than one input, it gets another line
-    * from the input buffer */
-    const ForwardLineData *maybeMoreInput(ThreadID tid,
-                const ForwardLineData *insts_in);
+      /** Sets line_in and PC and handles input buffer depending on what
+       * type of instruction it's being processed */
+      void finishLineProcessing(ThreadID tid, const ForwardLineData **line_in,
+                                bool prediction, bool discard_line);
 
-    /** If some instruction has been produced it reserves space for it
-    * in the next stage */
-    void reserveSpaceInNextStage(ForwardInstData &insts_out, ThreadID tid);
+      /** If the stage can process more than one input, it gets another line
+       * from the input buffer */
+      const ForwardLineData *maybeMoreInput(ThreadID tid,
+                                            const ForwardLineData *insts_in);
 
-    /** Mark the stage as active */
-    void markStageActivity();
+      /** If some instruction has been produced it reserves space for it
+       * in the next stage */
+      void reserveSpaceInNextStage(ForwardInstData &insts_out, ThreadID tid);
 
-    /** Push input buffer tail to make the buffer shift */
-    void pushTailInpBuffer();
+      /** Mark the stage as active */
+      void markStageActivity();
 
-  public:
+      /** Push input buffer tail to make the buffer shift */
+      void pushTailInpBuffer();
+      bool was_stalling = false;
 
-    /** Pass on input/buffer data to the output if you can */
-    void evaluate();
+    public:
+      /** Pass on input/buffer data to the output if you can */
+      void evaluate();
 
-    void minorTrace() const;
+      void minorTrace() const;
 
-    /** Is this stage drained?  For Decoed, draining is initiated by
-     *  Execute halting Fetch1 causing Fetch2 to naturally drain
-     *  into Decode and on to Execute which is responsible for
-     *  actually killing instructions */
-    bool isDrained();
-};
+      /** Is this stage drained?  For Decoed, draining is initiated by
+       *  Execute halting Fetch1 causing Fetch2 to naturally drain
+       *  into Decode and on to Execute which is responsible for
+       *  actually killing instructions */
+      bool isDrained();
+    };
 
-} // namespace minor
+  } // namespace minor
 } // namespace gem5
 
 #endif /* __CPU_MINOR_DECODE_HH__ */
