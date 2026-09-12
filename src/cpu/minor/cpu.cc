@@ -47,6 +47,7 @@ namespace gem5
 
     MinorCPU::MinorCPU(const BaseMinorCPUParams &params) : BaseCPU(params),
                                                            threadPolicy(params.threadPolicy),
+                                                           enableForwarding(params.enableForwarding),
                                                            stats(this)
     {
         /* This is only written for one thread at the moment */

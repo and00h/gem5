@@ -630,7 +630,8 @@ namespace gem5
                             *inst, committed_inst);
                     cpu.getLSQ().completeMemBarrierInst(inst, committed_inst);
                 }
-                if (inst->isMemRef() /* || inst->staticInst->isFullMemBarrier() */)
+                if (inst->isMemRef() && cpu.enableForwarding
+                    /* || inst->staticInst->isFullMemBarrier() */)
                 {
                     cpu.getScoreboard()[thread_id].clearInstDests(inst, true);
                 }

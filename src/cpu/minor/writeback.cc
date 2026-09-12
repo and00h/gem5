@@ -464,6 +464,9 @@ namespace gem5
 
                 if (completed_inst)
                 {
+                    if (inst && !cpu.enableForwarding)
+                        cpu.getScoreboard()[thread_id].clearInstDests(
+                            inst, inst->isMemRef());
                     DPRINTF(MinorGUI, "Log4GUI: writeback: %d: %d: %x: %s\n",
                             curTick(),
                             false,
