@@ -120,6 +120,8 @@ namespace gem5
 
     /** Thread Scheduling Policy (RoundRobin, Random, etc) */
     enums::ThreadPolicy threadPolicy;
+    /** Whether execute/memory may release dependencies before writeback. */
+    const bool enableForwarding;
 
   protected:
     /** Return a reference to the data port. */

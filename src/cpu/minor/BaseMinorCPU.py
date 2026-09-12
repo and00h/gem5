@@ -307,6 +307,10 @@ class BaseMinorCPU(BaseCPU):
         return True
 
     threadPolicy = Param.ThreadPolicy("RoundRobin", "Thread scheduling policy")
+    enableForwarding = Param.Bool(
+        True,
+        "Allow dependent instructions to consume results before writeback",
+    )
     fetch1FetchLimit = Param.Unsigned(
         1, "Number of line fetches allowable in flight at once"
     )
